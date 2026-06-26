@@ -270,6 +270,64 @@ cargo test -- --nocapture --test-threads=1
 
 ---
 
+## 🕒 TTL Lifecycle & Data Freshness
+
+### Current TTL Strategy
+
+All persistent storage entries are created with a TTL of **~1 year** (17280 × 365 ledgers):
+
+| Key | TTL Set At | Auto-Renewed On Mint? |
+|-----|-----------|----------------------|
+| `Wrap(user, period)` | `mint_wrap` | ❌ No — fixed at creation |
+| `WrapCount(user)` | `mint_wrap` | ✅ Yes — extended on every mint |
+| `LatestPeriod(user)` | `mint_wrap` | ✅ Yes — extended on every mint |
+| Contract instance | `extend_ttl` / `renew_all_ttls` | ✅ Yes — extended on every mint (via metadata keys) |
+
+### Design Decision: Auto-Renew Metadata Only
+
+**Chosen approach:** Auto-renew `WrapCount` and `LatestPeriod` metadata on every `mint_wrap`, but **not** individual historical wrap records.
+
+**Rationale:**
+- Metadata keys are small, cheap to extend, and essential for core queries (`balance_of`, `get_latest_wrap`)
+- Historical wraps are numerous — iterating them on every mint would be expensive (see gas analysis)
+- Full wrap enumeration requires period tracking, tracked as [Issue #90](https://github.com/zintarh/stellar-wrap-contract/issues/90)
+
+**Tradeoffs:**
+- ✅ Active users' metadata stays alive automatically
+- ✅ New wraps are always fully covered
+- ✅ Gas cost per mint is bounded and predictable
+- ❌ Historical wraps of long-active users could expire after ~1 year
+- ❌ Requires off-chain bots or admin to call `extend_ttl` for old periods of active users
+- ❌ Without [#90](https://github.com/zintarh/stellar-wrap-contract/issues/90), there is no way to enumerate a user's periods on-chain
+
+### Mitigation Recommendations
+
+1. **Off-chain renewal bot:** Run a cron job that calls `extend_ttl(user, period)` for all periods of users who have minted in the last 6 months
+2. **Admin bulk renewal:** Call `renew_all_ttls(user)` periodically for active users to renew their metadata keys
+3. **Future enhancement:** Implement period enumeration ([#90](https://github.com/zintarh/stellar-wrap-contract/issues/90)) to enable full auto-renewal on mint
+
+### Gas Analysis: Auto-Renewal Cost
+
+| Operation | Cost (CPU instructions) |
+|-----------|------------------------|
+| Single `extend_ttl` for 1 wrap | ~[TBD — run `test_gas_analysis`] |
+| Single `extend_ttl` for 5 wraps | ~[TBD — run `test_gas_analysis`] |
+| Auto-renew metadata in `mint_wrap` | Already included in mint cost (3 extend_ttl calls) |
+| 10 historical wraps + metadata | ~10× single wrap cost |
+
+> **Current implementation already extends 3 keys** on every mint (new wrap, WrapCount, LatestPeriod). Extending N additional historical wraps would add N× the cost of a single `extend_ttl`. For a user with 12 monthly wraps, auto-renewing all 12 would cost ~4× the current mint cost.
+
+### Test Coverage for TTL
+
+| Test | Purpose |
+|------|---------|
+| `test_metadata_ttl_extended_on_new_mint` | Verifies `WrapCount` and `LatestPeriod` survive after multiple mints |
+| `test_old_wrap_preserved_on_new_mint` | Verifies old wraps are not lost when new wraps are minted |
+| `test_renew_all_ttls_extends_metadata` | Verifies admin bulk-renewal works |
+| `test_renew_all_ttls_requires_admin_auth` | Verifies admin authorization is required |
+| `test_renew_all_ttls_before_init_fails` | Verifies failure before initialization |
+
+---
 ## 📚 Additional Security Best Practices
 
 ### 1. Invariant Testing

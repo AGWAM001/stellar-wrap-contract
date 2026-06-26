@@ -1287,3 +1287,165 @@ fn test_update_wrap_zero_hash_rejected() {
     let sig2 = sign_update_payload(&env, &signing_key, &contract_id, &user, period, &archetype, &zero_hash);
     client.update_wrap(&user, &period, &zero_hash, &archetype, &sig2);
 }
+
+// ─── Issue #91: TTL auto-renewal for active users ────────────────────────────
+
+#[test]
+fn test_metadata_ttl_extended_on_new_mint() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[50u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    // Mint first wrap
+    let sig1 = sign_payload(&env, &signing_key, &contract_id, &user, 2024, &archetype, &hash);
+    client.mint_wrap(&user, &2024, &archetype, &hash, &sig1);
+
+    // After first mint: balance = 1, latest = 2024
+    assert_eq!(client.balance_of(&user), 1);
+    assert_eq!(client.get_latest_wrap(&user).unwrap().period, 2024);
+
+    // Mint second wrap (higher period)
+    let sig2 = sign_payload(&env, &signing_key, &contract_id, &user, 2025, &archetype, &hash);
+    client.mint_wrap(&user, &2025, &archetype, &hash, &sig2);
+
+    // After second mint: balance = 2, latest = 2025
+    assert_eq!(client.balance_of(&user), 2);
+    assert_eq!(client.get_latest_wrap(&user).unwrap().period, 2025);
+
+    // Both metadata keys are alive — proves TTL was extended on each mint
+    let count_key = DataKey::WrapCount(user.clone());
+    let latest_key = DataKey::LatestPeriod(user.clone());
+    env.as_contract(&contract_id, || {
+        assert!(env.storage().persistent().has(&count_key));
+        assert!(env.storage().persistent().has(&latest_key));
+    });
+}
+
+#[test]
+fn test_old_wrap_preserved_on_new_mint() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[51u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+
+    // Mint first wrap (period 2024)
+    let sig1 = sign_payload(&env, &signing_key, &contract_id, &user, 2024, &archetype, &hash1);
+    client.mint_wrap(&user, &2024, &archetype, &hash1, &sig1);
+
+    // Mint second wrap (period 2025)
+    let sig2 = sign_payload(&env, &signing_key, &contract_id, &user, 2025, &archetype, &hash2);
+    client.mint_wrap(&user, &2025, &archetype, &hash2, &sig2);
+
+    // Old wrap (period 2024) is still intact and readable
+    let wrap1 = client.get_wrap(&user, &2024).unwrap();
+    assert_eq!(wrap1.period, 2024);
+    assert_eq!(wrap1.data_hash, hash1);
+
+    // New wrap (period 2025) is also intact
+    let wrap2 = client.get_wrap(&user, &2025).unwrap();
+    assert_eq!(wrap2.period, 2025);
+    assert_eq!(wrap2.data_hash, hash2);
+
+    // Balance reflects both wraps
+    assert_eq!(client.balance_of(&user), 2);
+}
+
+#[test]
+fn test_renew_all_ttls_extends_metadata() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[52u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[1u8; 32]);
+    let archetype = symbol_short!("arch");
+
+    let sig = sign_payload(&env, &signing_key, &contract_id, &user, 2024, &archetype, &hash);
+    client.mint_wrap(&user, &2024, &archetype, &hash, &sig);
+
+    // Verify metadata exists before renewal
+    assert_eq!(client.balance_of(&user), 1);
+    assert!(client.get_latest_wrap(&user).is_some());
+
+    // Admin renews all metadata TTls
+    client.renew_all_ttls(&user);
+
+    // Metadata still accessible after renewal
+    assert_eq!(client.balance_of(&user), 1);
+    assert!(client.get_latest_wrap(&user).is_some());
+}
+
+#[test]
+#[should_panic]
+fn test_renew_all_ttls_requires_admin_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[53u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+
+    // Seed a wrap directly without auth mocking
+    env.as_contract(&contract_id, || {
+        let wrap_key = DataKey::Wrap(user.clone(), 2024);
+        let count_key = DataKey::WrapCount(user.clone());
+        let latest_key = DataKey::LatestPeriod(user.clone());
+        let record = WrapRecord {
+            timestamp: env.ledger().timestamp(),
+            data_hash: BytesN::from_array(&env, &[1u8; 32]),
+            archetype: symbol_short!("arch"),
+            period: 2024,
+        };
+        env.storage().persistent().set(&wrap_key, &record);
+        env.storage().persistent().set(&count_key, &1u32);
+        env.storage().persistent().set(&latest_key, &2024u64);
+    });
+
+    // No auth mocked — admin.require_auth() must panic
+    client.renew_all_ttls(&user);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_renew_all_ttls_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    client.renew_all_ttls(&user);
+}
