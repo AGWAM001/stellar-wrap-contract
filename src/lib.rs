@@ -105,6 +105,38 @@ impl StellarWrapContract {
         );
     }
 
+    /// Replace the current admin public key used for Ed25519 signature verification.
+    ///
+    /// After rotation, any signatures produced by the old private key will no longer
+    /// pass verification. The admin must ensure the backend switches to the new key
+    /// before issuing new wrap signatures.
+    ///
+    /// # Parameters
+    /// - `new_pubkey`: The 32-byte Ed25519 public key that will replace the current one.
+    ///
+    /// # Authorization
+    /// Requires authorization from the **current** admin.
+    ///
+    /// # Panics
+    /// - [`ContractError::NotInitialized`] if the contract has not been initialized.
+    pub fn update_admin_pubkey(e: Env, new_pubkey: BytesN<32>) {
+        let current_admin: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
+
+        current_admin.require_auth();
+        e.storage()
+            .instance()
+            .set(&DataKey::AdminPubKey, &new_pubkey);
+
+        e.events().publish(
+            (symbol_short!("admin"), symbol_short!("pubkey")),
+            new_pubkey,
+        );
+    }
+
     /// Charge storage deposit units for a user before performing a persistent write.
     ///
     /// This is a lightweight DoS prevention mechanism: without it, an attacker can
