@@ -259,6 +259,10 @@ impl StellarWrapContract {
 
         Self::persist_wrap_record(&e, user.clone(), period, record, archetype);
 
+        // Extend instance storage TTL so admin/pubkey/schema keys don't expire
+        let ttl_one_year = 17280 * 365;
+        e.storage().instance().extend_ttl(ttl_one_year, ttl_one_year);
+
         e.storage().temporary().remove(&guard_key);
     }
     /// Publish a merkle root for batch wrap claims in a given period (admin-only).
