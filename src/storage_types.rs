@@ -13,5 +13,7 @@ pub enum DataKey {
     MerkleRoot(u64),
     MerkleClaimed(Address, u64),
     UserOptOut(Address),
+    /// Ordered list of all periods minted for a user (Vec<u64>)
+    WrapPeriods(Address),
 }
 
