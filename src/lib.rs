@@ -1,12 +1,27 @@
 #![no_std]
 
+mod constants;
+
+use crate::constants::PERSISTENT_TTL;
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol};
+
+#[contract]
+pub struct StellarWrapContract;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WrapRecord {
+    pub timestamp: u64,
+    pub data_hash: BytesN<32>,
+    pub archetype: Symbol,
+    pub period: u64,
 }
 
 #[contractimpl]
 impl StellarWrapContract {
     pub fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
         e.storage().instance().set(&symbol_short!("admin"), &admin);
-        e.storage().instance().set(&symbol_short!("admin_pubkey"), &admin_pubkey);
+        e.storage().instance().set(&symbol_short!("admpubkey"), &admin_pubkey);
     }
 
     pub fn mint_wrap(
@@ -25,6 +40,8 @@ impl StellarWrapContract {
         };
         let key = (user.clone(), period);
         e.storage().persistent().set(&key, &record);
+        e.storage().persistent().extend_ttl(&key, PERSISTENT_TTL, PERSISTENT_TTL);
+        e.storage().instance().extend_ttl(PERSISTENT_TTL, PERSISTENT_TTL);
     }
 
     pub fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
@@ -40,7 +57,13 @@ impl StellarWrapContract {
             0
         }
     }
+
+    pub fn extend_ttl(e: Env, user: Address, period: u64) {
+        let key = (user, period);
+        if e.storage().persistent().has(&key) {
+            e.storage().persistent().extend_ttl(&key, PERSISTENT_TTL, PERSISTENT_TTL);
+        }
+    }
 }
 
-// Re-export for tests
-pub use StellarWrapContractClient;
+
