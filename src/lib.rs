@@ -39,6 +39,13 @@ impl StellarWrapContract {
         queries::get_wrap(e, user, period)
     }
 
+    /// Returns the mint timestamp for a known user-period.
+    /// The timestamp reflects ledger time, not wall-clock time.
+    /// Returns `None` if no mint has occurred for the given user-period.
+    pub fn get_mint_timestamp(e: Env, user: Address, period: u64) -> Option<u64> {
+        queries::get_mint_timestamp(e, user, period)
+    }
+
     pub fn balance_of(e: Env, user: Address) -> i128 {
         queries::balance_of(e, user)
     }

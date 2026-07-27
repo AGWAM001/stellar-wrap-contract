@@ -6,6 +6,11 @@ pub(crate) fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>
     e.storage().persistent().get(&DataKey::Wrap(user, period))
 }
 
+pub(crate) fn get_mint_timestamp(e: Env, user: Address, period: u64) -> Option<u64> {
+    let wrap: Option<WrapRecord> = e.storage().persistent().get(&DataKey::Wrap(user, period));
+    wrap.map(|r| r.timestamp)
+}
+
 pub(crate) fn balance_of(e: Env, user: Address) -> i128 {
     let count_key = DataKey::WrapCount(user);
     e.storage()
