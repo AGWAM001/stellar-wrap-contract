@@ -29,6 +29,14 @@ Each wrap record stores:
 - year must be between `2024` and `2100`
 - month must be between `01` and `12`
 
+## SBT compatibility
+
+Wrap records are implemented as non-transferable (soulbound) entries. The contract intentionally omits `transfer`, `transfer_from`, `approve`, and `allowance` methods. As a result:
+
+- `balance_of(user)` returns the number of wrap records minted for `user`, not a tradable token balance.
+- records cannot be transferred between addresses by users.
+- any future removal or replacement of a wrap record would require an admin-controlled operation, not a user-initiated transfer.
+
 ## Storage keys
 
 - `DataKey::Admin`
