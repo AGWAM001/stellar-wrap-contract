@@ -662,3 +662,60 @@ fn test_get_admin_before_init_returns_none() {
 
     assert!(client.get_admin().is_none());
 }
+
+#[test]
+fn test_upgrade_emits_event() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
+    client.upgrade(&new_wasm_hash);
+
+    let events = env.events().all();
+    let last_event = events.last().expect("no events found");
+    let (_, topics, data) = last_event;
+
+    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let event_wasm_hash: BytesN<32> = data.try_into_val(&env).unwrap();
+
+    assert_eq!(event_topic, symbol_short!("upgrade"));
+    assert_eq!(event_wasm_hash, new_wasm_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_upgrade_requires_admin_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    // Mock only the non-admin authorization, admin should not be authorized
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
+    // This should panic because non_admin is not the admin
+    client.upgrade(&new_wasm_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_upgrade_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
+    client.upgrade(&new_wasm_hash);
+}
