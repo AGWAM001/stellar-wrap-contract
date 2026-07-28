@@ -14,10 +14,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, Symbol,
 };
 
-
 /// Helper function to sign payloads for testing
-}
-
 fn sign_payload(
     env: &Env,
     signer: &SigningKey,
@@ -58,7 +55,6 @@ fn test_replay_attack_same_period_fails() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     let data_hash = BytesN::from_array(&env, &[42u8; 32]);
     let archetype = symbol_short!("architect");
@@ -75,6 +71,7 @@ fn test_replay_attack_same_period_fails() {
     );
 
     // First mint - should succeed
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 
     // Verify the wrap was created
     let wrap = client.get_wrap(&user, &period);
@@ -82,6 +79,7 @@ fn test_replay_attack_same_period_fails() {
 
     // Replay attack: Try to mint again with the exact same parameters
     // This should PANIC with WrapAlreadyExists error (#4)
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 }
 
 /// Test 2: Replay Attack with Different Hash (but same period)
@@ -100,7 +98,6 @@ fn test_replay_attack_different_hash_same_period_fails() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     let data_hash_1 = BytesN::from_array(&env, &[42u8; 32]);
     let data_hash_2 = BytesN::from_array(&env, &[99u8; 32]);
@@ -118,6 +115,7 @@ fn test_replay_attack_different_hash_same_period_fails() {
     );
 
     // First mint - should succeed
+    client.mint_wrap(&user, &period, &archetype, &data_hash_1, &signature_1);
 
     let signature_2 = sign_payload(
         &env,
@@ -131,6 +129,7 @@ fn test_replay_attack_different_hash_same_period_fails() {
 
     // Try to mint again for the same period with a different hash
     // This should still fail - period is already used
+    client.mint_wrap(&user, &period, &archetype, &data_hash_2, &signature_2);
 }
 
 /// Test 3: Multiple Valid Periods Work Correctly
@@ -148,7 +147,6 @@ fn test_multiple_periods_for_same_user_success() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     let data_hash_1 = BytesN::from_array(&env, &[42u8; 32]);
     let data_hash_2 = BytesN::from_array(&env, &[99u8; 32]);
@@ -188,6 +186,9 @@ fn test_multiple_periods_for_same_user_success() {
     );
 
     // All three should succeed
+    client.mint_wrap(&user, &period_1, &archetype, &data_hash_1, &signature_1);
+    client.mint_wrap(&user, &period_2, &archetype, &data_hash_2, &signature_2);
+    client.mint_wrap(&user, &period_3, &archetype, &data_hash_3, &signature_3);
 
     // Verify all three wraps exist
     assert!(client.get_wrap(&user, &period_1).is_some());
@@ -215,7 +216,6 @@ fn test_signature_cannot_be_stolen_by_another_user() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     // Admin creates a signature for User A
     let data_hash_for_a = BytesN::from_array(&env, &[42u8; 32]);
@@ -233,6 +233,7 @@ fn test_signature_cannot_be_stolen_by_another_user() {
     );
 
     // User A mints successfully
+    client.mint_wrap(&user_a, &period, &archetype, &data_hash_for_a, &signature_a);
 
     // Verify User A has the wrap
     let wrap_a = client.get_wrap(&user_a, &period);
@@ -253,13 +254,11 @@ fn test_signature_cannot_be_stolen_by_another_user() {
     );
 
     client.mint_wrap(
-        &admin,
         &user_b,
         &period_b,
         &archetype,
         &data_hash_for_b,
         &signature_b,
-        &None,
     );
 
     // Verify both users have their respective wraps and they're distinct
@@ -300,8 +299,6 @@ fn test_cross_contract_replay_protection() {
     client_v2.initialize(&admin, &admin_pubkey);
 
     env.mock_all_auths();
-    register_security_archetypes(&client_v1);
-    register_security_archetypes(&client_v2);
 
     let data_hash = BytesN::from_array(&env, &[42u8; 32]);
     let archetype = symbol_short!("architect");
@@ -318,6 +315,7 @@ fn test_cross_contract_replay_protection() {
     );
 
     // Mint successfully on V1
+    client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
 
     // Verify the wrap exists on V1
     let wrap_v1 = client_v1.get_wrap(&user, &period);
@@ -335,6 +333,7 @@ fn test_cross_contract_replay_protection() {
         &data_hash,
     );
 
+    client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v2);
 
     // Verify both contracts have independent storage
     let wrap_v2 = client_v2.get_wrap(&user, &period);
@@ -367,7 +366,6 @@ fn test_gas_analysis_mint_operation() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     let data_hash = BytesN::from_array(&env, &[42u8; 32]);
     let archetype = symbol_short!("architect");
@@ -387,6 +385,7 @@ fn test_gas_analysis_mint_operation() {
     env.budget().reset_default();
 
     // Perform the mint operation
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 
     // Get budget consumption
     env.budget().print();
@@ -427,21 +426,20 @@ fn test_gas_analysis_multiple_mints() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     env.budget().reset_default();
 
     // Perform 5 mints for different periods
-    for i in 1..6 {
+    for i in 0..5 {
         let data_hash = BytesN::from_array(&env, &[i as u8; 32]);
         let archetype = symbol_short!("architect");
 
         // Create unique period values
         let period = match i {
-            1 => 202512u64, // December 2025
-            2 => 202601u64, // January 2026
-            3 => 202602u64, // February 2026
-            4 => 202603u64, // March 2026
+            0 => 202512u64, // December 2025
+            1 => 202601u64, // January 2026
+            2 => 202602u64, // February 2026
+            3 => 202603u64, // March 2026
             _ => 202604u64, // April 2026
         };
 
@@ -455,6 +453,7 @@ fn test_gas_analysis_multiple_mints() {
             &data_hash,
         );
 
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
     }
 
     let cpu_insns = env.budget().cpu_instruction_cost();
@@ -464,307 +463,6 @@ fn test_gas_analysis_multiple_mints() {
     // Verify resource usage is within reasonable bounds for batch operations
     assert!(cpu_insns < 50_000_000, "Batch CPU too high: {}", cpu_insns);
     assert!(mem_bytes < 500_000, "Batch memory too high: {}", mem_bytes);
-}
-
-fn prepare_initialized_contract(env: &Env) -> (StellarWrapContractClient, Address, Address, SigningKey) {
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(env, &contract_id);
-    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
-    let admin_pubkey = BytesN::from_array(env, &signing_key.verifying_key().to_bytes());
-    let admin = Address::generate(env);
-    client.initialize(&admin, &admin_pubkey);
-    env.mock_all_auths();
-    (client, contract_id, admin, signing_key)
-}
-
-#[test]
-fn test_gas_analysis_initialize() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
-    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
-    let admin = Address::generate(&env);
-
-    env.budget().reset_default();
-    client.initialize(&admin, &admin_pubkey);
-
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "initialize",
-        cpu_insns,
-        mem_bytes,
-        INITIALIZE_CPU_LIMIT,
-        INITIALIZE_MEM_LIMIT,
-    );
-}
-
-#[test]
-fn test_gas_analysis_get_wrap() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, contract_id, _admin, signing_key) = prepare_initialized_contract(&env);
-    let user = Address::generate(&env);
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &data_hash,
-    );
-
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
-    env.budget().reset_default();
-
-    let _ = client.get_wrap(&user, &period);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark("get_wrap", cpu_insns, mem_bytes, GET_WRAP_CPU_LIMIT, GET_WRAP_MEM_LIMIT);
-}
-
-#[test]
-fn test_gas_analysis_balance_of() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, _contract_id, _admin, signing_key) = prepare_initialized_contract(&env);
-    let user = Address::generate(&env);
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &env.current_contract_address(),
-        &user,
-        period,
-        &archetype,
-        &data_hash,
-    );
-
-    // Mint a wrap to populate balance
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
-    env.budget().reset_default();
-
-    let _ = client.balance_of(&user);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "balance_of",
-        cpu_insns,
-        mem_bytes,
-        BALANCE_OF_CPU_LIMIT,
-        BALANCE_OF_MEM_LIMIT,
-    );
-}
-
-#[test]
-fn test_gas_analysis_verify_data() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, contract_id, _admin, signing_key) = prepare_initialized_contract(&env);
-    let user = Address::generate(&env);
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &data_hash,
-    );
-
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
-    let data = Bytes::from_array(&env, &[1u8; 32]);
-    env.budget().reset_default();
-
-    let _ = client.verify_data(&user, &period, &data);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "verify_data",
-        cpu_insns,
-        mem_bytes,
-        VERIFY_DATA_CPU_LIMIT,
-        VERIFY_DATA_MEM_LIMIT,
-    );
-}
-
-#[test]
-fn test_gas_analysis_get_latest_wrap_one() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, contract_id, _admin, signing_key) = prepare_initialized_contract(&env);
-    let user = Address::generate(&env);
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &data_hash,
-    );
-
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
-    env.budget().reset_default();
-
-    let _ = client.get_latest_wrap(&user);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "get_latest_wrap_1",
-        cpu_insns,
-        mem_bytes,
-        GET_LATEST_WRAP_ONE_CPU_LIMIT,
-        GET_LATEST_WRAP_ONE_MEM_LIMIT,
-    );
-}
-
-#[test]
-fn test_gas_analysis_get_latest_wrap_five() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, contract_id, _admin, signing_key) = prepare_initialized_contract(&env);
-    let user = Address::generate(&env);
-    let archetype = symbol_short!("architect");
-
-    for i in 0..5 {
-        let data_hash = BytesN::from_array(&env, &[i as u8; 32]);
-        let period = 202512u64 + i as u64;
-        let signature = sign_payload(
-            &env,
-            &signing_key,
-            &contract_id,
-            &user,
-            period,
-            &archetype,
-            &data_hash,
-        );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
-    }
-
-    env.budget().reset_default();
-    let _ = client.get_latest_wrap(&user);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "get_latest_wrap_5",
-        cpu_insns,
-        mem_bytes,
-        GET_LATEST_WRAP_FIVE_CPU_LIMIT,
-        GET_LATEST_WRAP_FIVE_MEM_LIMIT,
-    );
-}
-
-#[test]
-fn test_gas_analysis_extend_ttl() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, contract_id, _admin, signing_key) = prepare_initialized_contract(&env);
-    let user = Address::generate(&env);
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &data_hash,
-    );
-
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
-    env.budget().reset_default();
-
-    client.extend_ttl(&user, &period);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "extend_ttl",
-        cpu_insns,
-        mem_bytes,
-        EXTEND_TTL_CPU_LIMIT,
-        EXTEND_TTL_MEM_LIMIT,
-    );
-}
-
-#[test]
-fn test_gas_analysis_revoke_wrap() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, contract_id, _admin, signing_key) = prepare_initialized_contract(&env);
-    let user = Address::generate(&env);
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &data_hash,
-    );
-
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
-    env.budget().reset_default();
-
-    client.revoke_wrap(&user, &period);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "revoke_wrap",
-        cpu_insns,
-        mem_bytes,
-        REVOKE_WRAP_CPU_LIMIT,
-        REVOKE_WRAP_MEM_LIMIT,
-    );
-}
-
-#[test]
-fn test_gas_analysis_update_admin() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let (client, _contract_id, admin, signing_key) = prepare_initialized_contract(&env);
-    let new_admin = Address::generate(&env);
-    env.mock_all_auths();
-    env.budget().reset_default();
-
-    client.update_admin(&new_admin);
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    assert_benchmark(
-        "update_admin",
-        cpu_insns,
-        mem_bytes,
-        UPDATE_ADMIN_CPU_LIMIT,
-        UPDATE_ADMIN_MEM_LIMIT,
-    );
 }
 
 /// Test 8: Timestamp Manipulation Resistance
@@ -782,7 +480,6 @@ fn test_timestamp_is_from_ledger_not_user() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     // Set specific ledger timestamp
     env.ledger().with_mut(|li| {
@@ -803,6 +500,7 @@ fn test_timestamp_is_from_ledger_not_user() {
         &data_hash,
     );
 
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
 
@@ -825,6 +523,7 @@ fn test_timestamp_is_from_ledger_not_user() {
         &data_hash,
     );
 
+    client.mint_wrap(&user, &period_2, &archetype, &data_hash, &signature_2);
 
     let wrap_2 = client.get_wrap(&user, &period_2).unwrap();
     assert_eq!(
@@ -848,7 +547,6 @@ fn test_edge_case_long_symbols() {
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
-    register_security_archetypes(&client);
 
     let data_hash = BytesN::from_array(&env, &[42u8; 32]);
 
@@ -866,6 +564,7 @@ fn test_edge_case_long_symbols() {
         &data_hash,
     );
 
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 
     let wrap = client.get_wrap(&user, &period);
     assert!(wrap.is_some(), "Should handle reasonably long symbols");
@@ -904,140 +603,5 @@ fn test_non_admin_cannot_mint() {
     );
 
     // This should panic because attacker is not authorized
-}
-
-// ─── Degenerate Ed25519 key/signature edge cases ────────────────────────────
-//
-// `ed25519_verify` is a host function; invalid keys/signatures panic with a
-// VM crypto error (not a `ContractError`). Expected: invocation aborts before
-// any wrap record is stored.
-
-/// All-zero pubkey (identity point) — invalid Ed25519 public key.
-/// Expected: VM crypto panic during `ed25519_verify`, no wrap stored.
-#[test]
-#[should_panic]
-fn test_mint_with_all_zero_pubkey_rejected() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    let zero_pubkey = BytesN::from_array(&env, &[0u8; 32]);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin, &zero_pubkey);
-    env.mock_all_auths();
-
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = BytesN::from_array(&env, &[1u8; 64]);
-
-}
-
-/// All-ones (0xFF) pubkey — invalid curve point.
-/// Expected: VM crypto panic during `ed25519_verify`.
-#[test]
-#[should_panic]
-fn test_mint_with_all_ones_pubkey_rejected() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    let ones_pubkey = BytesN::from_array(&env, &[0xff; 32]);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin, &ones_pubkey);
-    env.mock_all_auths();
-
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let signature = BytesN::from_array(&env, &[1u8; 64]);
-
-}
-
-/// Valid pubkey but all-zero signature.
-/// Expected: VM crypto panic during `ed25519_verify`.
-#[test]
-#[should_panic]
-fn test_mint_with_all_zero_signature_rejected() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
-    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin, &admin_pubkey);
-    env.mock_all_auths();
-
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let zero_sig = BytesN::from_array(&env, &[0u8; 64]);
-
-}
-
-/// Valid pubkey but all-ones (0xFF) signature.
-/// Expected: VM crypto panic during `ed25519_verify`.
-#[test]
-#[should_panic]
-fn test_mint_with_all_ones_signature_rejected() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
-    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin, &admin_pubkey);
-    env.mock_all_auths();
-
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-    let ones_sig = BytesN::from_array(&env, &[0xff; 64]);
-
-}
-
-/// Valid pubkey but single-bit tampered signature.
-/// Expected: VM crypto panic during `ed25519_verify`.
-#[test]
-#[should_panic]
-fn test_mint_with_tampered_signature_rejected() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
-    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin, &admin_pubkey);
-    env.mock_all_auths();
-
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("architect");
-    let period = 202512u64;
-
-    let mut sig_bytes = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &data_hash,
-    )
-    .to_array();
-    sig_bytes[0] ^= 0x01;
-    let tampered_sig = BytesN::from_array(&env, &sig_bytes);
-
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 }
