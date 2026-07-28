@@ -88,6 +88,14 @@ pub(crate) fn mint_wrap(
         .persistent()
         .extend_ttl(&count_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
+    let total_key = DataKey::TotalWrapCount;
+    let current_total: u32 = e.storage().persistent().get(&total_key).unwrap_or(0);
+    let next_total = current_total + 1;
+    e.storage().persistent().set(&total_key, &next_total);
+    e.storage()
+        .persistent()
+        .extend_ttl(&total_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
     let latest_key = DataKey::LatestPeriod(user.clone());
     let current_latest: u64 = e.storage().persistent().get(&latest_key).unwrap_or(0);
     if period > current_latest {

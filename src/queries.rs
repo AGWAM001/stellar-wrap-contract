@@ -14,6 +14,13 @@ pub(crate) fn balance_of(e: Env, user: Address) -> i128 {
         .unwrap_or(0) as i128
 }
 
+pub(crate) fn total_wrap_count(e: Env) -> u32 {
+    e.storage()
+        .persistent()
+        .get(&DataKey::TotalWrapCount)
+        .unwrap_or(0)
+}
+
 pub(crate) fn verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool {
     let wrap: Option<WrapRecord> = e.storage().persistent().get(&DataKey::Wrap(user, period));
     match wrap {
