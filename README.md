@@ -88,6 +88,150 @@ Recommended aggregation rule:
 3. count events per user
 4. sort descending by count to produce the leaderboard
 
+## Testnet deployment walkthrough
+
+### Prerequisites
+
+**Required tools:**
+- Rust and Cargo (for building)
+- Stellar CLI (`stellar`) - [installation guide](https://developers.stellar.org/docs/soroban/install)
+- Make (optional, for using the Makefile)
+
+**Required accounts:**
+- Deployer account with XLM on testnet (for paying deployment fees)
+- Admin address (public Stellar address that will control the contract)
+- Ed25519 signing key (private key used to sign mint payloads)
+
+**⚠️ Security note:** The admin address and Ed25519 signing key are separate:
+- **Admin address**: Public Stellar address stored on-chain for authorization
+- **Ed25519 signing key**: Private key used to sign mint payloads (never stored on-chain)
+- Keep the Ed25519 private key secure - it can authorize unlimited mints
+
+### Step 1: Build the contract
+
+```bash
+# Using Make
+make build
+
+# Or using cargo directly
+cargo build --release --target wasm32-unknown-unknown
+```
+
+This produces the WASM file at `target/wasm32-unknown-unknown/release/stellar_wrap_contract.wasm`.
+
+### Step 2: Deploy to testnet
+
+Set your deployer secret key as an environment variable:
+
+```bash
+export STELLAR_DEPLOYER_SECRET="S..."
+```
+
+Deploy the contract:
+
+```bash
+# Using Make
+make deploy-testnet
+
+# Or using stellar CLI directly
+stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/stellar_wrap_contract.wasm \
+  --network testnet \
+  --source "$STELLAR_DEPLOYER_SECRET"
+```
+
+Save the contract ID output - you'll need it for initialization.
+
+### Step 3: Initialize the contract
+
+You need:
+- `CONTRACT_ID`: From step 2
+- `ADMIN_ADDRESS`: Your admin Stellar address (public)
+- `ADMIN_PUBKEY`: The 32-byte public key of your Ed25519 signing key
+
+To get your Ed25519 public key from your private signing key:
+
+```bash
+# If you have the private key in hex format
+# This is a placeholder - use your actual Ed25519 key generation tool
+# The public key is 32 bytes
+```
+
+Initialize the contract:
+
+```bash
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  --source "$STELLAR_DEPLOYER_SECRET" \
+  -- initialize \
+  --admin <ADMIN_ADDRESS> \
+  --admin_pubkey <ADMIN_PUBKEY_HEX>
+```
+
+### Step 4: Mint your first wrap
+
+You need to sign a payload with your Ed25519 signing key. The payload includes:
+- Contract address
+- User address (who will receive the wrap)
+- Period (YYYYMM format)
+- Archetype (symbol)
+- Data hash (SHA-256 of your wrap data)
+
+Example using a signing script (you'll need to implement this based on your Ed25519 library):
+
+```bash
+# 1. Prepare your data and hash it
+echo '{"score":100,"level":"gold"}' > data.json
+DATA_HASH=$(sha256sum data.json | cut -d' ' -f1)
+
+# 2. Sign the payload with your Ed25519 private key
+# (Use your preferred Ed25519 signing tool)
+SIGNATURE=$(sign-payload \
+  --contract <CONTRACT_ID> \
+  --user <USER_ADDRESS> \
+  --period 202401 \
+  --archetype "arch" \
+  --data_hash $DATA_HASH \
+  --private-key <ED25519_PRIVATE_KEY>)
+
+# 3. Mint the wrap
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  --source <USER_ADDRESS_SECRET> \
+  -- mint_wrap \
+  --user <USER_ADDRESS> \
+  --period 202401 \
+  --archetype "arch" \
+  --data_hash $DATA_HASH \
+  --signature $SIGNATURE
+```
+
+### Step 5: Verify the mint
+
+Query the contract to verify the wrap was minted:
+
+```bash
+stellar contract read \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- get_wrap \
+  --user <USER_ADDRESS> \
+  --period 202401
+```
+
+### Upgrading an existing contract
+
+To upgrade an existing contract instead of deploying fresh:
+
+```bash
+export CONTRACT_ID="<EXISTING_CONTRACT_ID>"
+make deploy-testnet
+```
+
+This will upload the new WASM without creating a new contract instance.
+
 ## Development
 
 Run the test suite with:
