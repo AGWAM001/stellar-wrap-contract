@@ -12,7 +12,7 @@ mod queries;
 mod storage_types;
 
 pub use errors::ContractError;
-pub use storage_types::{DataKey, WrapRecord};
+pub use storage_types::{ContractHealth, DataKey, WrapRecord};
 
 #[contract]
 pub struct StellarWrapContract;
@@ -66,6 +66,10 @@ impl StellarWrapContract {
 
     pub fn get_admin(e: Env) -> Option<Address> {
         queries::get_admin(e)
+    }
+
+    pub fn health(e: Env) -> ContractHealth {
+        queries::health(e)
     }
 
     pub fn name(e: Env) -> String {
