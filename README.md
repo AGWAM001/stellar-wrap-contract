@@ -1,5 +1,7 @@
 # Stellar Wrap Contract
 
+[![Coverage](https://codecov.io/gh/zintarh/stellar-wrap-contract/branch/main/graph/badge.svg)](https://codecov.io/gh/zintarh/stellar-wrap-contract)
+
 Soroban contract for storing non-transferable Stellar Wrap records by wallet and reporting successful wrap mints through events.
 
 ## Contract layout
