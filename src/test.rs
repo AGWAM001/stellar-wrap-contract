@@ -667,6 +667,7 @@ fn test_get_admin_before_init_returns_none() {
 
 #[test]
 fn test_migrate_applies_once_per_version() {
+fn test_get_mint_timestamp_exists() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -689,6 +690,38 @@ fn test_migrate_applies_once_per_version() {
 #[test]
 #[should_panic(expected = "Error(Contract, #7)")]
 fn test_migrate_rejects_replay() {
+    let signing_key = SigningKey::from_bytes(&[14u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let dummy_hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &dummy_hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &signature);
+
+    let wrap = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(
+        client.get_mint_timestamp(&user, &period),
+        Some(wrap.timestamp)
+    );
+}
+
+#[test]
+fn test_get_mint_timestamp_missing() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -712,4 +745,8 @@ fn test_migrate_before_init_fails() {
     env.mock_all_auths();
 
     client.migrate(&1);
+    let user = Address::generate(&env);
+    let period = 202401u64;
+
+    assert_eq!(client.get_mint_timestamp(&user, &period), None);
 }
