@@ -141,26 +141,26 @@ fn test_revoke_emits_event_multi_user() {
 
     let revoke_events: Vec<_> = events
         .iter()
-        .filter(|(topic, _, _)| {
-            let sym: Symbol = topic.get(0).unwrap().try_into_val(&env).unwrap();
+        .filter(|(_, topics, _)| {
+            let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             sym == symbol_short!("revoke")
         })
         .collect();
 
     assert_eq!(revoke_events.len(), 2);
 
-    let (_, topics_a, data_a) = revoke_events[0];
+    let (_, topics_a, data_a) = &revoke_events[0];
     let event_user_a: Address = topics_a.get(1).unwrap().try_into_val(&env).unwrap();
     let event_period_a: u64 = topics_a.get(2).unwrap().try_into_val(&env).unwrap();
-    let event_archetype_a: Symbol = data_a.try_into_val(&env).unwrap();
+    let event_archetype_a: Symbol = data_a.clone().try_into_val(&env).unwrap();
     assert_eq!(event_user_a, user_a);
     assert_eq!(event_period_a, period_a);
     assert_eq!(event_archetype_a, archetype_a);
 
-    let (_, topics_b, data_b) = revoke_events[1];
+    let (_, topics_b, data_b) = &revoke_events[1];
     let event_user_b: Address = topics_b.get(1).unwrap().try_into_val(&env).unwrap();
     let event_period_b: u64 = topics_b.get(2).unwrap().try_into_val(&env).unwrap();
-    let event_archetype_b: Symbol = data_b.try_into_val(&env).unwrap();
+    let event_archetype_b: Symbol = data_b.clone().try_into_val(&env).unwrap();
     assert_eq!(event_user_b, user_b);
     assert_eq!(event_period_b, period_b);
     assert_eq!(event_archetype_b, archetype_b);
@@ -294,6 +294,35 @@ fn test_update_admin_success() {
 
     client.update_admin(&new_admin);
     assert_eq!(client.get_admin().unwrap(), new_admin);
+}
+
+#[test]
+fn test_update_admin_emits_event() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.update_admin(&new_admin);
+
+    let events = env.events().all();
+    let last_event = events.last().expect("Expected at least one event");
+    let (_, topics, data) = last_event;
+
+    let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic_0, symbol_short!("admin"));
+    assert_eq!(topic_1, symbol_short!("updated"));
+
+    let (old_admin_val, new_admin_val): (Address, Address) = data.try_into_val(&env).unwrap();
+    assert_eq!(old_admin_val, admin);
+    assert_eq!(new_admin_val, new_admin);
 }
 
 #[test]
@@ -741,7 +770,6 @@ fn test_get_admin_before_init_returns_none() {
 
 #[test]
 fn test_migrate_applies_once_per_version() {
-fn test_get_mint_timestamp_exists() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -764,6 +792,37 @@ fn test_get_mint_timestamp_exists() {
 #[test]
 #[should_panic(expected = "Error(Contract, #7)")]
 fn test_migrate_rejects_replay() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.migrate(&1);
+    client.migrate(&1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_migrate_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    client.migrate(&1);
+}
+
+#[test]
+fn test_get_mint_timestamp_exists() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
     let signing_key = SigningKey::from_bytes(&[14u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
@@ -800,25 +859,6 @@ fn test_get_mint_timestamp_missing() {
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
-    let admin = Address::generate(&env);
-    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
-
-    client.initialize(&admin, &pubkey);
-    env.mock_all_auths();
-
-    client.migrate(&1);
-    client.migrate(&1);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #2)")]
-fn test_migrate_before_init_fails() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-    env.mock_all_auths();
-
-    client.migrate(&1);
     let user = Address::generate(&env);
     let period = 202401u64;
 

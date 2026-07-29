@@ -1,4 +1,4 @@
-use soroban_sdk::{panic_with_error, Address, BytesN, Env};
+use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
 use crate::{ContractError, DataKey};
 
@@ -21,8 +21,14 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
 }
 
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
-    read_admin(&e).require_auth();
+    let current_admin = read_admin(&e);
+    current_admin.require_auth();
     e.storage().instance().set(&DataKey::Admin, &new_admin);
+
+    e.events().publish(
+        (symbol_short!("admin"), symbol_short!("updated")),
+        (current_admin, new_admin),
+    );
 }
 
 /// Marks a storage migration as applied. A version can only be applied once and
