@@ -258,9 +258,10 @@ Persistent (for user U)
 - `data_hash: BytesN<32>` → 32 bytes
 - `archetype: Symbol` → variable length (typically small; serialized in Soroban)
 - `period: u64` → 8 bytes
+- `fsm: WrapLifecycleFSM` → struct containing `state: WrapState` (enum discriminant) and `updated_at: u64` (8 bytes)
 
 **Baseline numeric bytes:**
-- `8 + 32 + 8 = 48 bytes` + `Symbol overhead`
+- `8 + 32 + 8 + 8 = 56 bytes` + `Symbol & WrapState overhead`
 
 #### Keys
 Each persistent entry uses a `DataKey` key:

@@ -4,11 +4,60 @@ use soroban_sdk::{contracttype, Address, BytesN, Symbol};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WrapState {
+    Draft = 1,
+    Pending = 2,
+    Active = 3,
+    Archived = 4,
+    Cancelled = 5,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WrapLifecycleFSM {
+    pub state: WrapState,
+    pub updated_at: u64,
+}
+
+impl WrapLifecycleFSM {
+    pub fn new(initial_state: WrapState, now: u64) -> Self {
+        Self {
+            state: initial_state,
+            updated_at: now,
+        }
+    }
+
+    pub fn can_transition_to(&self, next: &WrapState) -> bool {
+        match (&self.state, next) {
+            (WrapState::Draft, WrapState::Pending) => true,
+            (WrapState::Draft, WrapState::Cancelled) => true,
+            (WrapState::Pending, WrapState::Active) => true,
+            (WrapState::Pending, WrapState::Cancelled) => true,
+            (WrapState::Active, WrapState::Archived) => true,
+            (WrapState::Active, WrapState::Cancelled) => true,
+            _ => false,
+        }
+    }
+
+    pub fn transition_to(&mut self, next: WrapState, now: u64) -> bool {
+        if self.can_transition_to(&next) {
+            self.state = next;
+            self.updated_at = now;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WrapRecord {
     pub timestamp: u64,
     pub data_hash: BytesN<32>,
     pub archetype: Symbol,
     pub period: u64, // Standardized to u64 for better indexing/sorting
+    pub fsm: WrapLifecycleFSM,
 }
 
 #[contracttype]
