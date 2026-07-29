@@ -88,6 +88,10 @@ Recommended aggregation rule:
 3. count events per user
 4. sort descending by count to produce the leaderboard
 
+## Documentation
+
+- [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, and test vectors required by backend signing services (issue #213)
+
 ## Development
 
 Run the test suite with:
