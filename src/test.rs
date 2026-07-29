@@ -774,13 +774,25 @@ fn test_get_admin_before_init_returns_none() {
     assert!(client.get_admin().is_none());
 }
 
+<<<<<<< HEAD
 #[test]
 fn test_migrate_applies_once_per_version() {
 fn test_get_mint_timestamp_exists() {
+=======
+/// Verifies that `get_wrap` can be safely called before the contract is initialized.
+/// 
+/// Before initialization, no wrap records exist in persistent storage.
+/// This test confirms that `get_wrap` returns `None` rather than panicking,
+/// allowing client developers to query wrap state without requiring an
+/// initialization guard.
+#[test]
+fn test_get_wrap_returns_none_before_initialization() {
+>>>>>>> test/244-get-wrap-before-init
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
+<<<<<<< HEAD
     let admin = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 32]);
 
@@ -949,3 +961,11 @@ fn test_fsm_transition_nonexistent_wrap_fails() {
     client.transition_wrap_state(&user, &202401u64, &WrapState::Archived);
 }
 
+=======
+    let user = Address::generate(&env);
+    let period = 202401u64;
+
+    let result = client.get_wrap(&user, &period);
+    assert!(result.is_none());
+}
+>>>>>>> test/244-get-wrap-before-init

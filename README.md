@@ -68,7 +68,8 @@ Returned by `health()`, reports:
 
 ### Read methods
 
-- `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`
+- `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`  
+  Returns the wrap record for the specified user and period. Safe to call before initialization — returns `None` if the contract has not been initialized or if no wrap exists for the given user and period.
 - `balance_of(e: Env, user: Address) -> i128`
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
 - `get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord>`
