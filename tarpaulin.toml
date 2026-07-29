@@ -1,0 +1,45 @@
+# cargo-tarpaulin configuration for stellar-wrap-contract
+#
+# This is a #![no_std] Soroban contract.  The cdylib crate-type cannot be
+# instrumented directly, but the test suite is compiled with the soroban-sdk
+# "testutils" feature which pulls in std.  --lib targets the library source
+# (src/lib.rs and its modules) compiled for the native test binary, which is
+# exactly the code we want to measure.
+#
+# Reference: https://github.com/xd009642/tarpaulin
+
+[config]
+# Instrument the lib target only.  The cdylib output produced by --release
+# can't be instrumented; tarpaulin works by compiling native test binaries.
+lib = true
+
+# Emit both a browsable HTML report and a Cobertura XML report (consumed by
+# the CI badge step and compatible with codecov / coveralls upload actions).
+out = ["Html", "Xml"]
+
+# Write all output to coverage/ so it's easy to gitignore and upload as a
+# single artifact.
+output-dir = "coverage"
+
+# Target line coverage to meet the >90% acceptance criterion.
+# tarpaulin exits non-zero when the measured rate falls below this value.
+fail-under = 90
+
+# Run each test in its own process to get accurate hit counts.
+# (tarpaulin default is "Benchmarks" which reuses the process; per-test
+# separation is more precise for Soroban's mock environment.)
+run-types = ["Tests"]
+
+# Exclude files that should not count toward coverage:
+#   - test modules themselves  (testing the tests is not useful)
+#   - property-test harness    (proptest scaffolding, not contract logic)
+#   - constants.rs             (contains no executable lines)
+exclude-files = [
+    "src/test.rs",
+    "src/security_test.rs",
+    "src/prop_test.rs",
+    "src/constants.rs",
+]
+
+# Avoid instrumenting generated code inside the target directory.
+exclude = ["target/*"]
