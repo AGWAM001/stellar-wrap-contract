@@ -56,6 +56,66 @@ Each wrap record stores:
 - `symbol(e: Env) -> String`
 - `decimals(e: Env) -> u32`
 
+### CLI examples
+
+Placeholder variables:
+
+- `<CONTRACT_ID>` — deployed contract address (e.g. `C...`)
+- `<USER_ADDRESS>` — Stellar account address (e.g. `G...`)
+- `<PERIOD>` — period encoded as `YYYYMM` (e.g. `202401`)
+- `<DATA_HEX>` — hex-encoded raw data bytes
+
+#### `get_wrap`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  get_wrap \
+  --user <USER_ADDRESS> \
+  --period <PERIOD>
+```
+
+Returns `Option<WrapRecord>` — either the record (see [WrapRecord](#wraprecord)) or `null`.
+
+#### `get_latest_wrap`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  get_latest_wrap \
+  --user <USER_ADDRESS>
+```
+
+Returns `Option<WrapRecord>` — same shape as `get_wrap`, or `null`.
+
+#### `balance_of`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  balance_of \
+  --user <USER_ADDRESS>
+```
+
+Returns an integer count of wraps for the user (e.g. `42`).
+
+#### `verify_data`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  verify_data \
+  --user <USER_ADDRESS> \
+  --period <PERIOD> \
+  --data <DATA_HEX>
+```
+
+Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
+
 ## Event schema
 
 Successful wrap mints emit one event:
