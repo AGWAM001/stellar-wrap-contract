@@ -18,6 +18,7 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     e.storage()
         .instance()
         .set(&DataKey::AdminPubKey, &admin_pubkey);
+    e.events().publish((symbol_short!("init"),), admin);
 }
 
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
