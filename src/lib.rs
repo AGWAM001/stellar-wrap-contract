@@ -76,17 +76,6 @@ impl StellarWrapContract {
         signature: BytesN<64>,
     ) {
         mint::mint_wrap(e, user, period, archetype, data_hash, signature);
-        let key = (user.clone(), period);
-        if e.storage().persistent().has(&key) {
-            panic_with_error!(e, ContractError::WrapAlreadyExists);
-        }
-        let record = WrapRecord {
-            timestamp: e.ledger().timestamp(),
-            data_hash,
-            archetype,
-            period,
-        };
-        e.storage().persistent().set(&key, &record);
     }
 
     pub fn revoke_wrap(e: Env, user: Address, period: u64) {
