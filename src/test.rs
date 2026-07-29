@@ -1391,6 +1391,7 @@ fn test_fsm_invalid_state_transition_fails() {
 
 #[test]
 fn test_mint_guard_on_failure_leaves_no_residual_state() {
+fn test_upgrade_emits_event() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1604,6 +1605,27 @@ fn test_mint_wrap_max_hash_succeeds() {
 
 #[test]
 #[should_panic]
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
+    client.upgrade(&new_wasm_hash);
+
+    let events = env.events().all();
+    let last_event = events.last().expect("no events found");
+    let (_, topics, data) = last_event;
+
+    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let event_wasm_hash: BytesN<32> = data.try_into_val(&env).unwrap();
+
+    assert_eq!(event_topic, symbol_short!("upgrade"));
+    assert_eq!(event_wasm_hash, new_wasm_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_upgrade_requires_admin_auth() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
@@ -1954,6 +1976,16 @@ fn test_metadata_ttl_extended_on_new_mint() {
 
     let new_pubkey = BytesN::from_array(&env, &[0u8; 32]);
     client.update_admin_pubkey(&new_pubkey);
+    let non_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    // Mock only the non-admin authorization, admin should not be authorized
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
+    // This should panic because non_admin is not the admin
+    client.upgrade(&new_wasm_hash);
 }
 
 #[test]
@@ -2143,4 +2175,12 @@ fn test_renew_all_ttls_before_init_fails() {
     assert_eq!(t0, symbol_short!("admin"));
     assert_eq!(t1, symbol_short!("pubkey"));
     assert_eq!(emitted_key, new_pubkey);
+fn test_upgrade_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
+    client.upgrade(&new_wasm_hash);
 }

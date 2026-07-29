@@ -56,6 +56,10 @@ impl StellarWrapContract {
         admin::migration_version(&e)
     }
 
+    pub fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+        admin::upgrade(e, new_wasm_hash);
+    }
+
     pub fn mint_wrap(
         e: Env,
         user: Address,
