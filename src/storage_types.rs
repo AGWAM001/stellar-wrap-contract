@@ -88,4 +88,6 @@ pub enum DataKey {
     MigrationVersion,
     /// Stores a list of periods a user has minted wraps for.
     UserPeriods(Address),
+    /// Stores the paused state of the contract.
+    Paused,
 }
