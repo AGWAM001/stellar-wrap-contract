@@ -1,5 +1,8 @@
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
@@ -9,7 +12,7 @@ mod queries;
 mod storage_types;
 
 pub use errors::ContractError;
-pub use storage_types::{DataKey, WrapRecord};
+pub use storage_types::{ContractHealth, DataKey, WrapRecord};
 
 #[contract]
 pub struct StellarWrapContract;
@@ -22,6 +25,16 @@ impl StellarWrapContract {
 
     pub fn update_admin(e: Env, new_admin: Address) {
         admin::update_admin(e, new_admin);
+    }
+
+    /// Records that the storage migration `version` has been applied.
+    /// Admin-only, and each version can only be applied once.
+    pub fn migrate(e: Env, version: u32) {
+        admin::migrate(e, version);
+    }
+
+    pub fn migration_version(e: Env) -> u32 {
+        admin::migration_version(&e)
     }
 
     pub fn mint_wrap(
@@ -55,6 +68,10 @@ impl StellarWrapContract {
         queries::get_admin(e)
     }
 
+    pub fn health(e: Env) -> ContractHealth {
+        queries::health(e)
+    }
+
     pub fn name(e: Env) -> String {
         queries::name(e)
     }
@@ -72,3 +89,5 @@ impl StellarWrapContract {
 mod security_test;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_utils;
