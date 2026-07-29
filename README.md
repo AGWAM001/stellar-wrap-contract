@@ -46,7 +46,6 @@ Returned by `health()`, reports:
 - `initialized: bool` — whether `initialize()` has been called
 - `has_admin: bool` — whether an admin address is currently configured
 - `has_signing_key: bool` — whether an admin signing key is currently configured
->>>>>>> main
 
 ## Storage keys
 
@@ -68,7 +67,8 @@ Returned by `health()`, reports:
 
 ### Read methods
 
-- `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`
+- `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`  
+  Returns the wrap record for the specified user and period. Safe to call before initialization — returns `None` if the contract has not been initialized or if no wrap exists for the given user and period.
 - `balance_of(e: Env, user: Address) -> i128`
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
 - `get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord>`
@@ -82,6 +82,67 @@ Returned by `health()`, reports:
 ## Event schemas
 
 ### Mint event
+### CLI examples
+
+Placeholder variables:
+
+- `<CONTRACT_ID>` — deployed contract address (e.g. `C...`)
+- `<USER_ADDRESS>` — Stellar account address (e.g. `G...`)
+- `<PERIOD>` — period encoded as `YYYYMM` (e.g. `202401`)
+- `<DATA_HEX>` — hex-encoded raw data bytes
+
+#### `get_wrap`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  get_wrap \
+  --user <USER_ADDRESS> \
+  --period <PERIOD>
+```
+
+Returns `Option<WrapRecord>` — either the record (see [WrapRecord](#wraprecord)) or `null`.
+
+#### `get_latest_wrap`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  get_latest_wrap \
+  --user <USER_ADDRESS>
+```
+
+Returns `Option<WrapRecord>` — same shape as `get_wrap`, or `null`.
+
+#### `balance_of`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  balance_of \
+  --user <USER_ADDRESS>
+```
+
+Returns an integer count of wraps for the user (e.g. `42`).
+
+#### `verify_data`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  verify_data \
+  --user <USER_ADDRESS> \
+  --period <PERIOD> \
+  --data <DATA_HEX>
+```
+
+Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
+
+## Event schema
 
 Successful wrap mints emit one event:
 
@@ -308,9 +369,43 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.94.1 with the
 `rustup` installed, the correct toolchain is selected automatically.
 
 Run the test suite with:
+## Local Development Quickstart
 
+### Prerequisites
+
+- **Rust** – install via [rustup](https://rustup.rs/). The project targets a recent stable toolchain.
+- **wasm32 target** – add the WebAssembly compilation target:
+  ```bash
+  rustup target add wasm32-unknown-unknown
+  ```
+- **Stellar CLI** (recommended) – install from the [Stellar soroban-cli releases](https://github.com/stellar/stellar-cli/releases) or via `cargo`:
+  ```bash
+  cargo install stellar-cli
+  ```
+  Alternatively, install the legacy **Soroban CLI**:
+  ```bash
+  cargo install soroban-cli
+  ```
+
+### Common commands
+
+| Action | Command |
+|---|---|
+| Format | `cargo fmt` |
+| Format check (CI) | `cargo fmt --check` or `make fmt-check` |
+| Lint | `cargo clippy -- -D warnings` or `make lint` |
+| Test | `cargo test` or `make test` |
+| Release build (WASM) | `cargo build --release --target wasm32-unknown-unknown` or `make build` |
+| Deploy to testnet | `make deploy-testnet` |
+| Docker reproducible build | `make docker-build` or `docker build -t stellar-wrap-contract .` |
+
+See the `Makefile` for the full list of targets (`make help`).
+
+### Troubleshooting
+
+**"target `wasm32-unknown-unknown` not installed"**
 ```bash
-cargo test
+rustup target add wasm32-unknown-unknown
 ```
 
 Build the WASM artifact with:
@@ -318,3 +413,24 @@ Build the WASM artifact with:
 ```bash
 cargo build --release --target wasm32-unknown-unknown
 ```
+**SDK / toolchain mismatch errors** (e.g. `package \`soroban-sdk\` cannot be built because it requires a different Rust version`)
+
+The Soroban SDK often tracks Rust nightly or a specific stable release. If you see version conflicts:
+- Verify your Rust version matches what the lockfile expects:
+  ```bash
+  rustup show
+  rustup update stable
+  ```
+- If the SDK pins a nightly, install and use it:
+  ```bash
+  rustup install nightly-YYYY-MM-DD
+  rustup target add wasm32-unknown-unknown --toolchain nightly-YYYY-MM-DD
+  cargo +nightly-YYYY-MM-DD build --release --target wasm32-unknown-unknown
+  ```
+- Clean stale artifacts before switching toolchains:
+  ```bash
+  cargo clean
+  ```
+
+**WASM build fails with link errors**
+Ensure `wasm32-unknown-unknown` is the active target and no host-specific native dependencies leak in. The `Dockerfile` provides a fully isolated environment for reproducible WASM builds.

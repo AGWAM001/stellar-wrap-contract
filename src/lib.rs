@@ -27,25 +27,10 @@ mod revoke;
 mod storage_types;
 
 pub use errors::ContractError;
-pub use storage_types::{ContractHealth, DataKey, WrapRecord};
+pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
 
 #[contract]
 pub struct StellarWrapContract;
-use soroban_sdk::{
-    contracterror,
-    panic_with_error,
-    symbol_short,
-    Address, BytesN, Env, Symbol,
-};
-
-/// Errors returned by the StellarWrap contract.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum ContractError {
-    /// A wrap record for this `(user, period)` pair already exists. (code 4)
-    WrapAlreadyExists = 4,
-}
 
 #[contractimpl]
 impl StellarWrapContract {
@@ -55,6 +40,10 @@ impl StellarWrapContract {
 
     pub fn update_admin(e: Env, new_admin: Address) {
         admin::update_admin(e, new_admin);
+    }
+
+    pub fn unpause(e: Env) {
+        admin::unpause(e);
     }
 
     /// Records that the storage migration `version` has been applied.
@@ -76,6 +65,15 @@ impl StellarWrapContract {
         signature: BytesN<64>,
     ) {
         mint::mint_wrap(e, user, period, archetype, data_hash, signature);
+    }
+
+    pub fn transition_wrap_state(
+        e: Env,
+        user: Address,
+        period: u64,
+        next_state: WrapState,
+    ) {
+        mint::transition_wrap_state(e, user, period, next_state);
     }
 
     pub fn revoke_wrap(e: Env, user: Address, period: u64) {
