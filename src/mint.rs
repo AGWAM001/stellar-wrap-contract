@@ -32,10 +32,10 @@ fn build_payload(
 ) -> Bytes {
     let mut payload = Bytes::new(e);
     payload.append(&contract.to_xdr(e));
-    payload.append(&user.clone().to_xdr(e));
+    payload.append(&user.to_xdr(e));
     payload.append(&period.to_xdr(e));
-    payload.append(&archetype.clone().to_xdr(e));
-    payload.append(&data_hash.clone().to_xdr(e));
+    payload.append(&archetype.to_xdr(e));
+    payload.append(&data_hash.to_xdr(e));
     payload
 }
 

@@ -69,6 +69,8 @@ impl StellarWrapContract {
 }
 
 #[cfg(test)]
+mod prop_test;
+#[cfg(test)]
 mod security_test;
 #[cfg(test)]
 mod test;

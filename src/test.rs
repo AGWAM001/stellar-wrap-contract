@@ -39,6 +39,66 @@ fn sign_payload(
 }
 
 #[test]
+fn test_failed_mint_does_not_update_latest_period() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[14u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    
+    let period_1: u64 = 202401;
+    let signature_1 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period_1,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(&user, &period_1, &archetype, &hash, &signature_1); 
+
+    let latest_wrap = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest_wrap.period, period_1, "Latest wrap should be period_1 after successful mint");
+
+    let period_2: u64 = 202402;
+    
+    let bad_signing_key = SigningKey::from_bytes(&[99u8; 32]);
+    let invalid_signature = sign_payload(
+        &env,
+        &bad_signing_key,
+        &contract_id,
+        &user,
+        period_2,
+        &archetype,
+        &hash,
+    );
+    
+    let failed_mint_result = client.try_mint_wrap(&user, &period_2, &archetype, &hash, &invalid_signature);
+    
+    assert!(
+        failed_mint_result.is_err(), 
+        "Mint should fail for invalid signature"
+    );
+
+    let latest_wrap_after_fail = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(
+        latest_wrap_after_fail.period, 
+        period_1, 
+        "LatestPeriod should only change after successful mint storage commits"
+    );
+}
+
+#[test]
 fn test_minting_flow() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
