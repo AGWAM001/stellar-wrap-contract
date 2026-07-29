@@ -1,4 +1,4 @@
-.PHONY: build test fmt fmt-check lint clean deploy-testnet wasm-build docker-build docker-build-verify
+.PHONY: build test fmt fmt-check lint clean deploy-testnet wasm-build docker-build docker-build-verify coverage
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +22,14 @@ test:
 ## test-verbose: Run all tests with stdout output (useful for gas analysis)
 test-verbose:
 	cargo test -- --nocapture --test-threads=1
+
+## coverage: Run cargo-tarpaulin and generate HTML + XML reports in coverage/
+##   Requires cargo-tarpaulin: cargo install cargo-tarpaulin --locked
+##   Exits non-zero if line coverage falls below the fail-under threshold in
+##   tarpaulin.toml (currently 90%).
+coverage:
+	cargo tarpaulin --config tarpaulin.toml
+	@echo "Coverage report written to coverage/tarpaulin-report.html"
 
 # ── Format ───────────────────────────────────────────────────────────────────
 

@@ -37,6 +37,6 @@ pub enum DataKey {
     LatestPeriod(Address),
     /// Stores the highest storage migration version already applied.
     MigrationVersion,
-    /// Circuit breaker pause flag (instance storage)
-    Paused,
+    /// Stores a list of periods a user has minted wraps for.
+    UserPeriods(Address),
 }

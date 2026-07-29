@@ -1,5 +1,7 @@
 # Stellar Wrap Contract
 
+[![Coverage](https://codecov.io/gh/zintarh/stellar-wrap-contract/branch/main/graph/badge.svg)](https://codecov.io/gh/zintarh/stellar-wrap-contract)
+
 Soroban contract for storing non-transferable Stellar Wrap records by wallet and reporting successful wrap mints through events.
 
 ## Contract layout
@@ -118,6 +120,18 @@ Revoke functionality is not implemented in this contract. Wraps are non-transfer
 ## Leaderboard decision
 
 Issue `#68` is implemented as an off-chain leaderboard strategy.
+
+## Tech Stack
+
+- **Language:** Rust
+- **Smart Contract Framework:** Soroban SDK v21.7.1
+- **Build Tool:** Cargo
+- **Target:** WebAssembly (WASM) for Soroban runtime
+- **Testing:** Soroban SDK testutils
+
+> **Note:** Dependency versions are pinned exactly (`=21.7.1`) in `Cargo.toml`. For reproducible builds, always build against the committed `Cargo.lock` (run `cargo build --locked` / `cargo test --locked`) rather than letting Cargo re-resolve versions.
+
+---
 
 Reasoning:
 

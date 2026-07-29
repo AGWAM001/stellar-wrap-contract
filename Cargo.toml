@@ -11,8 +11,16 @@ path = "src/lib.rs"
 soroban-sdk = "=21.7.1"
 
 [dev-dependencies]
-soroban-sdk = { version = "=21.7.1", features = ["testutils"] }
+# Main Soroban SDK with test utilities (required for Address::generate, mock_auths, etc.)
+soroban-sdk = { version = "21.7.1", features = ["testutils"] }
+
+# Used for signature generation in property tests.
+# Pinned to 2.1.1 (latest 2.1.x patch); versions < 2.0 are vulnerable to
+# RUSTSEC-2022-0093 (double public key signing oracle attack), fixed in 2.0+.
 ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
+
+# Property-based testing
+proptest = { version = "1", default-features = false, features = ["alloc"] }
 
 [profile.release]
 opt-level = "z"

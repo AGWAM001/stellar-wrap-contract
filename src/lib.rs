@@ -1,3 +1,17 @@
+//! # Stellar Wrap Registry
+//!
+//! A Soroban smart contract on Stellar that records timestamped data-wrap
+//! commitments on-chain. Each wrap binds a user address, a period
+//! (`YYYYMM`), an archetype label, and a SHA-256 data hash into an
+//! immutable record.
+//!
+//! ## Security
+//!
+//! Minting requires an Ed25519 signature from the configured admin key
+//! over the full payload (contract ID, user, period, archetype, data hash).
+//! This prevents unauthorized wraps even if the caller contract is
+//! compromised. The admin address controls the public-key rotation.
+
 #![no_std]
 
 #[cfg(test)]
@@ -9,6 +23,7 @@ mod admin;
 mod errors;
 mod mint;
 mod queries;
+mod revoke;
 mod storage_types;
 
 pub use errors::ContractError;
@@ -78,6 +93,10 @@ impl StellarWrapContract {
         e.storage().persistent().set(&key, &record);
     }
 
+    pub fn revoke_wrap(e: Env, user: Address, period: u64) {
+        revoke::revoke_wrap(e, user, period);
+    }
+
     pub fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
         queries::get_wrap(e, user, period)
     }
@@ -99,6 +118,10 @@ impl StellarWrapContract {
 
     pub fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
         queries::get_latest_wrap(e, user)
+    }
+
+    pub fn get_wraps(e: Env, user: Address, start: u32, limit: u32) -> soroban_sdk::Vec<WrapRecord> {
+        queries::get_wraps(e, user, start, limit)
     }
 
     pub fn get_admin(e: Env) -> Option<Address> {
