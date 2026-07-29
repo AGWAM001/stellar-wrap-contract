@@ -17,6 +17,8 @@ jobs:
       run: cargo fmt --check
     - name: Run clippy
       run: cargo clippy -- -D warnings
+    - name: Check doc compilation
+      run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
     - name: Run tests
       run: cargo test
 

@@ -9,6 +9,7 @@
 * **Clean Commits:** Use descriptive commit messages (e.g., `feat: implement mint function` not `fix`).
 * **No Force Pushing:** If you need to change something, add a new commit or squash locally before pushing.
 * **Code Style:** Ensure `cargo fmt` and `cargo clippy` pass before submitting.
+* **Doc Check:** Run `make doc` (or `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`) to verify documentation compiles without warnings.
 
 **Step 2.1: Install Git Hooks (Required)**
 1. Install pre-commit once on your machine:
