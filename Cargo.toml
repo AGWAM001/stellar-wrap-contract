@@ -8,11 +8,11 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-soroban-sdk = "=21.7.1"
+soroban-sdk = "=27.0.3"
 
 [dev-dependencies]
-soroban-sdk = { version = "=21.7.1", features = ["testutils"] }
-ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
+soroban-sdk = { version = "=27.0.3", features = ["testutils"] }
+ed25519-dalek = { version = "=3.0.0", features = ["rand_core"] }
 
 [profile.release]
 opt-level = "z"

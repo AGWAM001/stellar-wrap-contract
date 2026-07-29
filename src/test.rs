@@ -6,9 +6,9 @@ use super::*;
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events},
+    testutils::{Address as _, Events, Ledger},
     xdr::ToXdr,
-    Address, Bytes, BytesN, Env, String, Symbol, TryIntoVal,
+    Address, Bytes, BytesN, Env, String, Symbol, TryFromVal, TryIntoVal, Val,
 };
 use std::vec::Vec;
 
@@ -101,12 +101,17 @@ fn test_mint_emits_event() {
     client.mint_wrap(&user, &period, &archetype, &hash, &signature);
 
     let events = env.events().all();
-    let last_event = events.last().expect("no events found");
-    let (_, topics, data) = last_event;
+    let last_event = events.events().last().expect("no events found");
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
     let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_period: u64 = Val::try_from_val(&env, topics.get(2).unwrap())
+        .unwrap()
+        .try_into_val(&env)
+        .unwrap();
     let event_archetype: Symbol = data.try_into_val(&env).unwrap();
 
     assert_eq!(event_topic, symbol_short!("mint"));
@@ -661,4 +666,75 @@ fn test_get_admin_before_init_returns_none() {
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     assert!(client.get_admin().is_none());
+}
+
+#[test]
+fn test_revoke_and_remint_updates_timestamp() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[99u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let old_hash = BytesN::from_array(&env, &[42u8; 32]);
+    let new_hash = BytesN::from_array(&env, &[84u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &old_hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &old_hash, &sig);
+
+    let wrap = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap.timestamp, 1000);
+    assert_eq!(wrap.data_hash, old_hash);
+
+    client.revoke_wrap(&user, &period);
+    assert!(client.get_wrap(&user, &period).is_none());
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 2000;
+    });
+
+    let sig2 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &new_hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &new_hash, &sig2);
+
+    let wrap = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(
+        wrap.timestamp, 2000,
+        "reminted wrap should have the current ledger timestamp"
+    );
+    assert_eq!(
+        wrap.data_hash, new_hash,
+        "reminted wrap should store the new data hash"
+    );
+    assert_ne!(
+        wrap.data_hash, old_hash,
+        "old data hash must not be retained"
+    );
 }

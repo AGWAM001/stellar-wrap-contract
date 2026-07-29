@@ -51,6 +51,10 @@ impl StellarWrapContract {
         queries::get_latest_wrap(e, user)
     }
 
+    pub fn revoke_wrap(e: Env, user: Address, period: u64) {
+        admin::revoke_wrap(e, user, period);
+    }
+
     pub fn get_admin(e: Env) -> Option<Address> {
         queries::get_admin(e)
     }
