@@ -42,6 +42,10 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+    pub fn unpause(e: Env) {
+        admin::unpause(e);
+    }
+
     /// Records that the storage migration `version` has been applied.
     /// Admin-only, and each version can only be applied once.
     pub fn migrate(e: Env, version: u32) {
