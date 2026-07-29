@@ -12,6 +12,7 @@ The contract is split into focused modules:
 - `src/queries.rs`: read-only queries and metadata
 - `src/errors.rs`: contract error codes
 - `src/storage_types.rs`: storage keys and persisted record types
+- `src/test_utils.rs`: shared test-only helpers (e.g. payload signing)
 
 ## Data model
 
@@ -29,6 +30,14 @@ Each wrap record stores:
 - year must be between `2024` and `2100`
 - month must be between `01` and `12`
 
+### `ContractHealth`
+
+Returned by `health()`, reports:
+
+- `initialized: bool` — whether `initialize()` has been called
+- `has_admin: bool` — whether an admin address is currently configured
+- `has_signing_key: bool` — whether an admin signing key is currently configured
+
 ## Storage keys
 
 - `DataKey::Admin`
@@ -36,6 +45,7 @@ Each wrap record stores:
 - `DataKey::Wrap(Address, u64)`
 - `DataKey::WrapCount(Address)`
 - `DataKey::LatestPeriod(Address)`
+- `DataKey::MigrationVersion`
 
 ## Public interface
 
@@ -44,6 +54,7 @@ Each wrap record stores:
 - `initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>)`
 - `update_admin(e: Env, new_admin: Address)`
 - `mint_wrap(e: Env, user: Address, period: u64, archetype: Symbol, data_hash: BytesN<32>, signature: BytesN<64>)`
+- `migrate(e: Env, version: u32)`
 
 ### Read methods
 
@@ -52,24 +63,49 @@ Each wrap record stores:
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
 - `get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord>`
 - `get_admin(e: Env) -> Option<Address>`
+- `health(e: Env) -> ContractHealth`
 - `name(e: Env) -> String`
 - `symbol(e: Env) -> String`
 - `decimals(e: Env) -> u32`
+- `migration_version(e: Env) -> u32`
 
-## Event schema
+## Event schemas
+
+### Mint event
 
 Successful wrap mints emit one event:
 
+- **Topic 0**: `mint` (`Symbol`)
+- **Topic 1**: `user` (`Address`) - The wallet address that received the wrap
+- **Topic 2**: `period` (`u64`) - The period in `YYYYMM` format (e.g., `202401`)
+- **Data**: `archetype` (`Symbol`) - The wrap archetype identifier
+
+**Example values:**
 - Topic 0: `mint`
-- Topic 1: `user` (`Address`)
-- Topic 2: `period` (`u64`, `YYYYMM`)
-- Data: `archetype` (`Symbol`)
+- Topic 1: `GD5...` (32-byte Stellar address)
+- Topic 2: `202401`
+- Data: `arch` (or any short symbol)
 
-Properties relevant to indexers:
+**Properties relevant to indexers:**
+- The event is emitted only after signature verification and storage writes succeed
+- Duplicate `(user, period)` mints are rejected, so one event equals one successful new wrap
+- `period` is always a validated `YYYYMM` value (year: 2024-2100, month: 01-12)
 
-- the event is emitted only after signature verification and storage writes succeed
-- duplicate `(user, period)` mints are rejected, so one event equals one successful new wrap
-- `period` is always a validated `YYYYMM` value
+### Admin update event
+
+The `update_admin` function does **not** emit an event. To track admin changes, indexers should:
+- Query the `get_admin(e)` function periodically
+- Store the current admin address and detect changes across queries
+
+### Revoke event
+
+Revoke functionality is not implemented in this contract. Wraps are non-transferable and permanent once minted.
+
+## Important note for indexers
+
+**⚠️ Do not infer state from events alone.** Use contract queries to verify wrap existence:
+- `get_wrap(e, user, period)` to retrieve full wrap record
+- `balance_of(e, user)` to get total wrap count for a user
 
 ## Leaderboard decision
 
@@ -231,11 +267,32 @@ make deploy-testnet
 ```
 
 This will upload the new WASM without creating a new contract instance.
+## Upgrade compatibility
+
+An upgrade replaces contract code while keeping storage, so any change to the
+storage layout must ship as a numbered migration:
+
+- `DataKey::MigrationVersion` stores the highest migration version applied (`0` before any migration).
+- `migrate(version)` is admin-only and only accepts a version greater than the stored one, so a
+  migration can never run twice — a replay panics with `MigrationAlreadyApplied` (#7).
+- Additive changes (new `DataKey` variants, new methods) need no migration; changing or removing
+  the shape of an existing key does, and the new code must bump the migration version.
+- Call `migrate` in the same transaction batch as the upgrade, and verify with `migration_version()`.
 
 ## Development
+
+The toolchain is pinned in `rust-toolchain.toml` (Rust 1.94.1 with the
+`wasm32-unknown-unknown` target), so local, Docker, and CI builds match. With
+`rustup` installed, the correct toolchain is selected automatically.
 
 Run the test suite with:
 
 ```bash
 cargo test
+```
+
+Build the WASM artifact with:
+
+```bash
+cargo build --release --target wasm32-unknown-unknown
 ```
