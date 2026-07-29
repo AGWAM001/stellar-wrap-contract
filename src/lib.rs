@@ -24,6 +24,22 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+    pub fn propose_admin(e: Env, new_admin: Address) {
+        admin::propose_admin(e, new_admin);
+    }
+
+    pub fn accept_admin(e: Env) {
+        admin::accept_admin(e);
+    }
+
+    pub fn cancel_proposed_admin(e: Env) {
+        admin::cancel_proposed_admin(e);
+    }
+
+    pub fn get_pending_admin(e: Env) -> Option<Address> {
+        admin::get_pending_admin(e)
+    }
+
     pub fn mint_wrap(
         e: Env,
         user: Address,

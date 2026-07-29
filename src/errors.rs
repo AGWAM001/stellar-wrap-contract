@@ -10,4 +10,6 @@ pub enum ContractError {
     WrapAlreadyExists = 4,
     InvalidSignature = 5,
     InvalidPeriod = 6,
+    NoAdminTransferProposal = 7,
+    AdminTransferProposalExists = 8,
 }

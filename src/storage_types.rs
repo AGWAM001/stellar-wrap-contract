@@ -16,6 +16,8 @@ pub enum DataKey {
     Admin,
     /// Stores the Ed25519 public key used to validate backend signatures.
     AdminPubKey,
+    /// Stores a proposed new admin address during two-step transfer.
+    PendingAdmin,
     /// Stores individual wrap records keyed by user and period.
     Wrap(Address, u64),
     /// Stores the total number of wraps for a specific user.
