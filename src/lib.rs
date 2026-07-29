@@ -1,3 +1,17 @@
+//! # Stellar Wrap Registry
+//!
+//! A Soroban smart contract on Stellar that records timestamped data-wrap
+//! commitments on-chain. Each wrap binds a user address, a period
+//! (`YYYYMM`), an archetype label, and a SHA-256 data hash into an
+//! immutable record.
+//!
+//! ## Security
+//!
+//! Minting requires an Ed25519 signature from the configured admin key
+//! over the full payload (contract ID, user, period, archetype, data hash).
+//! This prevents unauthorized wraps even if the caller contract is
+//! compromised. The admin address controls the public-key rotation.
+
 #![no_std]
 
 #[cfg(test)]
