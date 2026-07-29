@@ -19,6 +19,8 @@ jobs:
       run: cargo clippy -- -D warnings
     - name: Run tests
       run: cargo test
+    - name: Clean test snapshots
+      run: rm -rf test_snapshots/
 
   coverage:
     runs-on: ubuntu-latest

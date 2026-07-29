@@ -9,10 +9,14 @@ path = "src/lib.rs"
 
 [dependencies]
 soroban-sdk = "=21.7.1"
+# ed25519-dalek is a direct dependency (not just dev) to force Cargo version
+# unification across the dependency tree. soroban-env-host transitively depends
+# on ed25519-dalek and would otherwise resolve to an incompatible v3.0 without
+# a Cargo.lock (which is gitignored). Keep this pin synced.
+ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
 
 [dev-dependencies]
 soroban-sdk = { version = "=21.7.1", features = ["testutils"] }
-ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
 
 [profile.release]
 opt-level = "z"

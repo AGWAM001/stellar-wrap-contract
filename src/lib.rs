@@ -1,5 +1,8 @@
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
