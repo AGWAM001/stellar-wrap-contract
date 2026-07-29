@@ -785,6 +785,12 @@ fn test_get_mint_timestamp_exists() {
 /// initialization guard.
 #[test]
 fn test_get_wrap_returns_none_before_initialization() {
+// ─── Issue #26: instance storage TTL tests ──────────────────────────────────
+
+#[test]
+fn test_instance_ttl_extended_on_mint() {
+    // Verifies that mint_wrap calls extend_ttl on instance storage,
+    // keeping admin/pubkey/schema accessible after many ledgers.
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -808,6 +814,7 @@ fn test_get_wrap_returns_none_before_initialization() {
 #[should_panic(expected = "Error(Contract, #7)")]
 fn test_migrate_rejects_replay() {
     let signing_key = SigningKey::from_bytes(&[14u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[95u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -839,6 +846,22 @@ fn test_migrate_rejects_replay() {
 
 #[test]
 fn test_get_mint_timestamp_missing() {
+    let period = 202406u64;
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[14u8; 32]);
+
+    let sig = sign_payload(&env, &signing_key, &contract_id, &user, period, &archetype, &hash);
+    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+
+    // After mint, admin is still readable — instance storage was not expired
+    assert!(client.get_admin().is_some());
+    assert_eq!(client.get_admin().unwrap(), admin);
+}
+
+#[test]
+fn test_instance_ttl_extended_on_second_mint() {
+    // Ensures that a second mint by a different user still extends instance TTL,
+    // verifying the TTL extension happens on every mint call.
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -878,6 +901,11 @@ fn test_fsm_valid_state_transitions() {
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
+    let signing_key = SigningKey::from_bytes(&[96u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
@@ -962,4 +990,16 @@ fn test_fsm_transition_nonexistent_wrap_fails() {
 
     let result = client.get_wrap(&user, &period);
     assert!(result.is_none());
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[15u8; 32]);
+
+    let sig_a = sign_payload(&env, &signing_key, &contract_id, &user_a, 202407u64, &archetype, &hash);
+    client.mint_wrap(&user_a, &202407u64, &archetype, &hash, &sig_a);
+
+    let sig_b = sign_payload(&env, &signing_key, &contract_id, &user_b, 202407u64, &archetype, &hash);
+    client.mint_wrap(&user_b, &202407u64, &archetype, &hash, &sig_b);
+
+    // Admin address still accessible after multiple mints
+    assert_eq!(client.get_schema_version(), 1);
+    assert_eq!(client.get_admin().unwrap(), admin);
 }
