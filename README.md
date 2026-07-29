@@ -95,3 +95,7 @@ Run the test suite with:
 ```bash
 cargo test
 ```
+
+## Mainnet deployment
+
+Before deploying to mainnet, review the release checklist in [MAINNET_RELEASE_CHECKLIST.md](MAINNET_RELEASE_CHECKLIST.md). It covers tests, optimized builds, release artifact hash verification, signer backup, initialization, and rollback guidance.
