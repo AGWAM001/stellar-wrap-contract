@@ -66,6 +66,10 @@ impl StellarWrapContract {
     pub fn decimals(e: Env) -> u32 {
         queries::decimals(e)
     }
+
+    pub fn __upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+        admin::__upgrade(e, new_wasm_hash);
+    }
 }
 
 #[cfg(test)]

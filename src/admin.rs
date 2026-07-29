@@ -22,3 +22,15 @@ pub(crate) fn update_admin(e: Env, new_admin: Address) {
     current_admin.require_auth();
     e.storage().instance().set(&DataKey::Admin, &new_admin);
 }
+
+pub(crate) fn __upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+    let current_admin: Address = e
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
+
+    current_admin.require_auth();
+    e.deployer()
+        .update_current_contract_wasm(new_wasm_hash);
+}

@@ -662,3 +662,30 @@ fn test_get_admin_before_init_returns_none() {
 
     assert!(client.get_admin().is_none());
 }
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_upgrade_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let dummy_wasm_hash = BytesN::from_array(&env, &[0xAAu8; 32]);
+    client.__upgrade(&dummy_wasm_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_unauthorized_upgrade_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let dummy_wasm_hash = BytesN::from_array(&env, &[0xBBu8; 32]);
+    client.__upgrade(&dummy_wasm_hash);
+}
