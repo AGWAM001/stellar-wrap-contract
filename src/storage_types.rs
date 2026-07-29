@@ -3,7 +3,7 @@ extern crate std;
 use soroban_sdk::{contracttype, Address, BytesN, Symbol};
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum WrapState {
     Draft = 1,
     Pending = 2,
