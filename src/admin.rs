@@ -1,4 +1,4 @@
-use soroban_sdk::{panic_with_error, Address, BytesN, Env};
+use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
 use crate::{ContractError, DataKey};
 
@@ -23,6 +23,25 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
     read_admin(&e).require_auth();
     e.storage().instance().set(&DataKey::Admin, &new_admin);
+}
+
+pub(crate) fn set_pause(e: Env, paused: bool) {
+    read_admin(&e).require_auth();
+    e.storage().instance().set(&DataKey::Paused, &paused);
+    e.events().publish((symbol_short!("pause"),), paused);
+}
+
+pub(crate) fn is_paused(e: &Env) -> bool {
+    e.storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+}
+
+pub(crate) fn require_not_paused(e: &Env) {
+    if is_paused(e) {
+        panic_with_error!(e, ContractError::Paused);
+    }
 }
 
 /// Marks a storage migration as applied. A version can only be applied once and

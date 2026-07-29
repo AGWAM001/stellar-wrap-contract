@@ -86,4 +86,6 @@ pub enum DataKey {
     LatestPeriod(Address),
     /// Stores the highest storage migration version already applied.
     MigrationVersion,
+    /// Emergency pause state flag.
+    Paused,
 }

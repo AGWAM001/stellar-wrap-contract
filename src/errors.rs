@@ -13,4 +13,5 @@ pub enum ContractError {
     MigrationAlreadyApplied = 7,
     InvalidStateTransition = 8,
     WrapNotFound = 9,
+    Paused = 10,
 }
