@@ -24,6 +24,10 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+    pub fn revoke_wrap(e: Env, user: Address, period: u64) {
+        admin::revoke_wrap(e, user, period);
+    }
+
     pub fn mint_wrap(
         e: Env,
         user: Address,

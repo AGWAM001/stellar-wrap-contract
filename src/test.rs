@@ -662,3 +662,83 @@ fn test_get_admin_before_init_returns_none() {
 
     assert!(client.get_admin().is_none());
 }
+
+/// Issue #241: reminting after revoke must replace the archetype and emit both events.
+#[test]
+fn test_remint_after_revoke_updates_archetype() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[21u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let period = 202406u64;
+    let archetype_old = symbol_short!("arch");
+    let archetype_new = symbol_short!("builder");
+    let hash_old = BytesN::from_array(&env, &[41u8; 32]);
+    let hash_new = BytesN::from_array(&env, &[42u8; 32]);
+
+    let sig_old = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype_old,
+        &hash_old,
+    );
+    client.mint_wrap(&user, &period, &archetype_old, &hash_old, &sig_old);
+
+    let wrap_old = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap_old.archetype, archetype_old);
+
+    client.revoke_wrap(&user, &period);
+    assert!(client.get_wrap(&user, &period).is_none());
+
+    let events_after_revoke = env.events().all();
+    let (_, revoke_topics, revoke_data) = events_after_revoke
+        .last()
+        .expect("expected revoke event after revoke_wrap");
+    let revoke_topic: Symbol = revoke_topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let revoke_user: Address = revoke_topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let revoke_period: u64 = revoke_topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let revoked: bool = revoke_data.try_into_val(&env).unwrap();
+    assert_eq!(revoke_topic, symbol_short!("revoke"));
+    assert_eq!(revoke_user, user);
+    assert_eq!(revoke_period, period);
+    assert!(revoked);
+
+    let sig_new = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype_new,
+        &hash_new,
+    );
+    client.mint_wrap(&user, &period, &archetype_new, &hash_new, &sig_new);
+
+    let wrap_new = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap_new.archetype, archetype_new);
+    assert_eq!(wrap_new.data_hash, hash_new);
+
+    let events_after_remint = env.events().all();
+    let (_, mint_topics, mint_data) = events_after_remint
+        .last()
+        .expect("expected mint event after remint");
+    let mint_topic: Symbol = mint_topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let mint_user: Address = mint_topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let mint_period: u64 = mint_topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let mint_archetype: Symbol = mint_data.try_into_val(&env).unwrap();
+    assert_eq!(mint_topic, symbol_short!("mint"));
+    assert_eq!(mint_user, user);
+    assert_eq!(mint_period, period);
+    assert_eq!(mint_archetype, archetype_new);
+}
