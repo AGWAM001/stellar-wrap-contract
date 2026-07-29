@@ -662,3 +662,271 @@ fn test_get_admin_before_init_returns_none() {
 
     assert!(client.get_admin().is_none());
 }
+
+// ── Revocation Tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_revoke_wrap_success() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[15u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    assert_eq!(client.balance_of(&user), 1);
+    assert!(client.get_wrap(&user, &period).is_some());
+
+    let reason_hash = BytesN::from_array(&env, &[1u8; 32]);
+    client.revoke_wrap(&user, &period, &reason_hash);
+
+    assert!(client.get_wrap(&user, &period).is_none());
+    assert_eq!(client.balance_of(&user), 0);
+}
+
+#[test]
+fn test_revoke_wrap_emits_event() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[16u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+
+    let reason_hash = BytesN::from_array(&env, &[0xAAu8; 32]);
+    client.revoke_wrap(&user, &period, &reason_hash);
+
+    let events = env.events().all();
+    let last_event = events.last().expect("no events found");
+    let (_, topics, data) = last_event;
+
+    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_reason: BytesN<32> = data.try_into_val(&env).unwrap();
+
+    assert_eq!(event_topic, symbol_short!("revoke"));
+    assert_eq!(event_user, user);
+    assert_eq!(event_period, period);
+    assert_eq!(event_reason, reason_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_revoke_wrap_not_found_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+    client.revoke_wrap(&user, &202401, &reason_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_revoke_wrap_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+    client.revoke_wrap(&user, &202401, &reason_hash);
+}
+
+#[test]
+fn test_revoke_latest_period_clears_latest() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[17u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+
+    let sig1 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202401, &archetype, &hash1,
+    );
+    let sig2 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202402, &archetype, &hash2,
+    );
+
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &202402, &archetype, &hash2, &sig2);
+
+    let latest = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest.period, 202402);
+
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &202402, &reason_hash);
+
+    // LatestPeriod was cleared; get_latest_wrap returns None
+    assert!(client.get_latest_wrap(&user).is_none());
+    assert_eq!(client.balance_of(&user), 1);
+}
+
+#[test]
+fn test_revoke_non_latest_preserves_latest() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[18u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+
+    let sig1 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202401, &archetype, &hash1,
+    );
+    let sig2 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202403, &archetype, &hash2,
+    );
+
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &202403, &archetype, &hash2, &sig2);
+
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &202401, &reason_hash);
+
+    // Latest period (202403) should still be retrievable
+    let latest = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest.period, 202403);
+    assert_eq!(client.balance_of(&user), 1);
+}
+
+#[test]
+fn test_remint_after_revoke_succeeds() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[19u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+    let period = 202401u64;
+
+    let sig1 = sign_payload(
+        &env, &signing_key, &contract_id, &user, period, &archetype, &hash1,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash1, &sig1);
+
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &period, &reason_hash);
+
+    // Should be able to mint a new wrap for the same period after revocation
+    let sig2 = sign_payload(
+        &env, &signing_key, &contract_id, &user, period, &archetype, &hash2,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash2, &sig2);
+
+    let wrap = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap.data_hash, hash2);
+    assert_eq!(client.balance_of(&user), 1);
+}
+
+#[test]
+fn test_revoke_with_zero_reason_hash() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[20u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
+        &env, &signing_key, &contract_id, &user, period, &archetype, &hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+
+    // Zero reason hash (no reason provided)
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &period, &reason_hash);
+
+    assert!(client.get_wrap(&user, &period).is_none());
+    assert_eq!(client.balance_of(&user), 0);
+
+    // Verify the event still emitted with zero hash
+    let events = env.events().all();
+    let last_event = events.last().expect("no events found");
+    let (_, _, data) = last_event;
+    let event_reason: BytesN<32> = data.try_into_val(&env).unwrap();
+    assert_eq!(event_reason, reason_hash);
+}

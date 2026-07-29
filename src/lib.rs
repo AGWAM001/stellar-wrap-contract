@@ -6,6 +6,7 @@ mod admin;
 mod errors;
 mod mint;
 mod queries;
+mod revoke;
 mod storage_types;
 
 pub use errors::ContractError;
@@ -65,6 +66,10 @@ impl StellarWrapContract {
 
     pub fn decimals(e: Env) -> u32 {
         queries::decimals(e)
+    }
+
+    pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
+        revoke::revoke_wrap(e, user, period, reason_hash);
     }
 }
 

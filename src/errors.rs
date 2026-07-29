@@ -10,4 +10,5 @@ pub enum ContractError {
     WrapAlreadyExists = 4,
     InvalidSignature = 5,
     InvalidPeriod = 6,
+    WrapNotFound = 7,
 }

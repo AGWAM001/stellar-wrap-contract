@@ -605,3 +605,25 @@ fn test_non_admin_cannot_mint() {
     // This should panic because attacker is not authorized
     client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 }
+
+/// Test 11: Revocation - Non-admin cannot revoke wraps
+/// Only the admin should be able to revoke wrap records.
+/// Without any mocked auth, admin.require_auth() will panic.
+#[test]
+#[should_panic]
+fn test_non_admin_cannot_revoke() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+
+    // Do NOT mock any auths — admin.require_auth() should panic
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &202512, &reason_hash);
+}
