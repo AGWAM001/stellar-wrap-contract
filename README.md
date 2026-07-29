@@ -46,7 +46,6 @@ Returned by `health()`, reports:
 - `initialized: bool` — whether `initialize()` has been called
 - `has_admin: bool` — whether an admin address is currently configured
 - `has_signing_key: bool` — whether an admin signing key is currently configured
->>>>>>> main
 
 ## Storage keys
 
@@ -80,11 +79,9 @@ Returned by `health()`, reports:
 - `decimals(e: Env) -> u32`
 - `migration_version(e: Env) -> u32`
 
-<<<<<<< HEAD
 ## Event schemas
 
 ### Mint event
-=======
 ### CLI examples
 
 Placeholder variables:
@@ -146,7 +143,6 @@ soroban contract invoke \
 Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
 
 ## Event schema
->>>>>>> docs/cli-examples
 
 Successful wrap mints emit one event:
 
@@ -211,7 +207,6 @@ Recommended aggregation rule:
 3. count events per user
 4. sort descending by count to produce the leaderboard
 
-<<<<<<< HEAD
 ## Testnet deployment walkthrough
 
 ### Prerequisites
@@ -374,11 +369,9 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.94.1 with the
 `rustup` installed, the correct toolchain is selected automatically.
 
 Run the test suite with:
-=======
 ## Local Development Quickstart
 
 ### Prerequisites
->>>>>>> docs/local-dev-quickstart
 
 - **Rust** – install via [rustup](https://rustup.rs/). The project targets a recent stable toolchain.
 - **wasm32 target** – add the WebAssembly compilation target:
@@ -415,13 +408,11 @@ See the `Makefile` for the full list of targets (`make help`).
 rustup target add wasm32-unknown-unknown
 ```
 
-<<<<<<< HEAD
 Build the WASM artifact with:
 
 ```bash
 cargo build --release --target wasm32-unknown-unknown
 ```
-=======
 **SDK / toolchain mismatch errors** (e.g. `package \`soroban-sdk\` cannot be built because it requires a different Rust version`)
 
 The Soroban SDK often tracks Rust nightly or a specific stable release. If you see version conflicts:
@@ -443,4 +434,3 @@ The Soroban SDK often tracks Rust nightly or a specific stable release. If you s
 
 **WASM build fails with link errors**
 Ensure `wasm32-unknown-unknown` is the active target and no host-specific native dependencies leak in. The `Dockerfile` provides a fully isolated environment for reproducible WASM builds.
->>>>>>> docs/local-dev-quickstart

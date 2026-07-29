@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 .PHONY: build test fmt fmt-check lint clean deploy-testnet wasm-build docker-build docker-build-verify coverage
+=======
+.PHONY: build test fmt fmt-check lint doc clean deploy-testnet wasm-build docker-build docker-build-verify
+>>>>>>> ci/add-cargo-doc-check
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -46,6 +50,10 @@ fmt-check:
 ## lint: Run clippy and treat all warnings as errors
 lint:
 	cargo clippy -- -D warnings
+
+## doc: Build contract documentation and treat warnings as errors
+doc:
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 
