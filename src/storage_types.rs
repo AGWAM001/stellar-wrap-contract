@@ -22,4 +22,10 @@ pub enum DataKey {
     WrapCount(Address),
     /// Stores the latest period minted for a specific user.
     LatestPeriod(Address),
+    /// Stores the token display name, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::name`.
+    Name,
+    /// Stores the token symbol, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::symbol`.
+    Symbol,
 }
