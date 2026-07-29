@@ -750,3 +750,93 @@ fn test_migrate_before_init_fails() {
 
     assert_eq!(client.get_mint_timestamp(&user, &period), None);
 }
+
+#[test]
+fn test_fsm_valid_state_transitions() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let dummy_hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &dummy_hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &signature);
+
+    let wrap = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap.fsm.state, WrapState::Active);
+
+    // Transition Active -> Archived
+    client.transition_wrap_state(&user, &period, &WrapState::Archived);
+    let wrap = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap.fsm.state, WrapState::Archived);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #8)")]
+fn test_fsm_invalid_state_transition_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let dummy_hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &dummy_hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &signature);
+
+    // Transition Active -> Draft is invalid and should fail with #8 (InvalidStateTransition)
+    client.transition_wrap_state(&user, &period, &WrapState::Draft);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_fsm_transition_nonexistent_wrap_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.transition_wrap_state(&user, &202401u64, &WrapState::Archived);
+}
+

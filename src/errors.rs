@@ -11,4 +11,6 @@ pub enum ContractError {
     InvalidSignature = 5,
     InvalidPeriod = 6,
     MigrationAlreadyApplied = 7,
+    InvalidStateTransition = 8,
+    WrapNotFound = 9,
 }

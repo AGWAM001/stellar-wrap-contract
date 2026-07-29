@@ -2,6 +2,7 @@ use soroban_sdk::{
     panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol,
 };
 
+use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{ContractError, DataKey, WrapRecord};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
@@ -68,11 +69,13 @@ pub(crate) fn mint_wrap(
         panic_with_error!(e, ContractError::WrapAlreadyExists);
     }
 
+    let now = e.ledger().timestamp();
     let record = WrapRecord {
-        timestamp: e.ledger().timestamp(),
+        timestamp: now,
         data_hash,
         archetype: archetype.clone(),
         period,
+        fsm: WrapLifecycleFSM::new(WrapState::Active, now),
     };
 
     e.storage().persistent().set(&wrap_key, &record);
@@ -99,4 +102,35 @@ pub(crate) fn mint_wrap(
 
     e.events()
         .publish((symbol_short!("mint"), user, period), archetype);
+}
+
+pub(crate) fn transition_wrap_state(
+    e: Env,
+    user: Address,
+    period: u64,
+    next_state: WrapState,
+) {
+    user.require_auth();
+
+    let wrap_key = DataKey::Wrap(user.clone(), period);
+    let mut record: WrapRecord = e
+        .storage()
+        .persistent()
+        .get(&wrap_key)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::WrapNotFound));
+
+    let now = e.ledger().timestamp();
+    if !record.fsm.transition_to(next_state.clone(), now) {
+        panic_with_error!(e, ContractError::InvalidStateTransition);
+    }
+
+    e.storage().persistent().set(&wrap_key, &record);
+    e.storage()
+        .persistent()
+        .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+    e.events().publish(
+        (symbol_short!("trans"), user, period),
+        next_state,
+    );
 }
