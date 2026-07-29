@@ -6,11 +6,11 @@
 //! cross-contract replay protection, and resource consumption.
 
 use super::*;
+use crate::signature::construct_mint_payload;
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Ledger},
-    xdr::ToXdr,
     Address, Bytes, BytesN, Env, Symbol,
 };
 
@@ -24,12 +24,7 @@ fn sign_payload(
     archetype: &Symbol,
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
+    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash);
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;
@@ -282,7 +277,6 @@ fn test_signature_cannot_be_stolen_by_another_user() {
 fn test_cross_contract_replay_protection() {
     let env = Env::default();
 
-    // Deploy two separate contract instances (V1 and V2)
     let contract_v1 = env.register_contract(None, StellarWrapContract);
     let contract_v2 = env.register_contract(None, StellarWrapContract);
 
@@ -294,7 +288,6 @@ fn test_cross_contract_replay_protection() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
 
-    // Initialize both contracts with the same admin
     client_v1.initialize(&admin, &admin_pubkey);
     client_v2.initialize(&admin, &admin_pubkey);
 
@@ -302,7 +295,7 @@ fn test_cross_contract_replay_protection() {
 
     let data_hash = BytesN::from_array(&env, &[42u8; 32]);
     let archetype = symbol_short!("architect");
-    let period = 202512u64; // December 2025
+    let period = 202512u64;
 
     let signature_v1 = sign_payload(
         &env,
@@ -314,39 +307,26 @@ fn test_cross_contract_replay_protection() {
         &data_hash,
     );
 
-    // Mint successfully on V1
     client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
 
-    // Verify the wrap exists on V1
-    let wrap_v1 = client_v1.get_wrap(&user, &period);
-    assert!(wrap_v1.is_some(), "Wrap should exist on contract V1");
-
-    // The same user can mint on V2 (they are independent contracts)
-    // This should succeed because they are different contract instances
-    let signature_v2 = sign_payload(
-        &env,
-        &signing_key,
-        &contract_v2,
-        &user,
-        period,
-        &archetype,
-        &data_hash,
+    let payload_v1 =
+        construct_mint_payload(&env, &contract_v1, &user, period, &archetype, &data_hash);
+    let payload_v2 =
+        construct_mint_payload(&env, &contract_v2, &user, period, &archetype, &data_hash);
+    assert_ne!(
+        payload_v1, payload_v2,
+        "Payloads should differ across contract instances"
     );
 
-    client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v2);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
+    }));
 
-    // Verify both contracts have independent storage
-    let wrap_v2 = client_v2.get_wrap(&user, &period);
-    assert!(wrap_v2.is_some(), "Wrap should exist on contract V2");
-
-    // Both wraps should exist independently
-    assert!(client_v1.get_wrap(&user, &period).is_some());
-    assert!(client_v2.get_wrap(&user, &period).is_some());
-
-    // NOTE: For full cross-contract replay protection, the signature
-    // verification should include the contract address in the signed payload.
-    // This test demonstrates that the contracts currently have independent storage,
-    // but additional signature binding to contract_id would prevent true replay attacks.
+    assert!(
+        result.is_err(),
+        "A signature from V1 should not be replayable on V2"
+    );
+    assert!(client_v2.get_wrap(&user, &period).is_none());
 }
 
 /// Test 6: Gas/Resource Analysis - CPU Instructions

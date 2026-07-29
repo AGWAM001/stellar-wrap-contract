@@ -6,6 +6,7 @@ mod admin;
 mod errors;
 mod mint;
 mod queries;
+mod signature;
 mod storage_types;
 
 pub use errors::ContractError;

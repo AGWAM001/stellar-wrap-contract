@@ -56,6 +56,28 @@ Each wrap record stores:
 - `symbol(e: Env) -> String`
 - `decimals(e: Env) -> u32`
 
+## Security model
+
+Mint signatures are verified over a canonical payload that binds the request to:
+
+- a domain separator (`stellar-wrap-v1`)
+- the deploying contract instance address
+- the target user address
+- the period (`YYYYMM`)
+- the archetype symbol
+- the data hash
+
+The payload is constructed by concatenating the XDR-encoded fields in the order above. Off-chain signers should use the same byte layout when creating signatures:
+
+1. encode the domain separator as raw bytes
+2. append the XDR encoding of the contract address
+3. append the XDR encoding of the user address
+4. append the XDR encoding of the period as `u64`
+5. append the XDR encoding of the archetype symbol
+6. append the XDR encoding of the 32-byte data hash
+
+This ensures that a signature for one contract instance cannot be replayed against another deployment with the same admin key.
+
 ## Event schema
 
 Successful wrap mints emit one event:
