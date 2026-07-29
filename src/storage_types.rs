@@ -22,4 +22,6 @@ pub enum DataKey {
     WrapCount(Address),
     /// Stores the latest period minted for a specific user.
     LatestPeriod(Address),
+    /// Stores a user-controlled 32-byte alias hash for privacy-preserving profile display.
+    AliasHash(Address),
 }
