@@ -791,6 +791,10 @@ fn test_get_wrap_returns_none_before_initialization() {
 fn test_instance_ttl_extended_on_mint() {
     // Verifies that mint_wrap calls extend_ttl on instance storage,
     // keeping admin/pubkey/schema accessible after many ledgers.
+// ─── Issue #25: update_admin_pubkey tests ───────────────────────────────────
+
+#[test]
+fn test_update_admin_pubkey_success() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -893,6 +897,37 @@ fn test_migrate_before_init_fails() {
 
 #[test]
 fn test_fsm_valid_state_transitions() {
+    let old_signing_key = SigningKey::from_bytes(&[97u8; 32]);
+    let old_pubkey = BytesN::from_array(&env, &old_signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &old_pubkey);
+    env.mock_all_auths();
+
+    // Mint with old key — should succeed
+    let period_old = 202408u64;
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[16u8; 32]);
+    let sig_old = sign_payload(&env, &old_signing_key, &contract_id, &user, period_old, &archetype, &hash);
+    client.mint_wrap(&user, &period_old, &archetype, &hash, &sig_old);
+
+    // Rotate to new key
+    let new_signing_key = SigningKey::from_bytes(&[98u8; 32]);
+    let new_pubkey = BytesN::from_array(&env, &new_signing_key.verifying_key().to_bytes());
+    client.update_admin_pubkey(&new_pubkey);
+
+    // Mint with new key — should succeed
+    let period_new = 202409u64;
+    let sig_new = sign_payload(&env, &new_signing_key, &contract_id, &user, period_new, &archetype, &hash);
+    client.mint_wrap(&user, &period_new, &archetype, &hash, &sig_new);
+
+    assert_eq!(client.balance_of(&user), 2);
+}
+
+#[test]
+#[should_panic(expected = "Error(Crypto, InvalidInput)")]
+fn test_old_signature_fails_after_pubkey_rotation() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -971,6 +1006,31 @@ fn test_fsm_invalid_state_transition_fails() {
 #[test]
 #[should_panic(expected = "Error(Contract, #9)")]
 fn test_fsm_transition_nonexistent_wrap_fails() {
+    let old_signing_key = SigningKey::from_bytes(&[99u8; 32]);
+    let old_pubkey = BytesN::from_array(&env, &old_signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &old_pubkey);
+    env.mock_all_auths();
+
+    // Rotate to a new pubkey
+    let new_signing_key = SigningKey::from_bytes(&[100u8; 32]);
+    let new_pubkey = BytesN::from_array(&env, &new_signing_key.verifying_key().to_bytes());
+    client.update_admin_pubkey(&new_pubkey);
+
+    // Attempt to mint with the OLD key — should fail because old sig doesn't verify
+    // against the new pubkey. Soroban's ed25519_verify raises Error(Crypto, InvalidInput).
+    let period = 202410u64;
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[17u8; 32]);
+    let sig_old = sign_payload(&env, &old_signing_key, &contract_id, &user, period, &archetype, &hash);
+    client.mint_wrap(&user, &period, &archetype, &hash, &sig_old);
+}
+
+#[test]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_update_admin_pubkey_requires_admin_auth() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1008,6 +1068,20 @@ fn test_fsm_transition_nonexistent_wrap_fails() {
 
 #[test]
 fn test_metadata_ttl_extended_on_new_mint() {
+    let signing_key = SigningKey::from_bytes(&[101u8; 32]);
+    let pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    // Do NOT mock_all_auths — calling without admin authorization should fail
+
+    let new_pubkey = BytesN::from_array(&env, &[0u8; 32]);
+    client.update_admin_pubkey(&new_pubkey);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_update_admin_pubkey_before_init_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1050,6 +1124,13 @@ fn test_metadata_ttl_extended_on_new_mint() {
 
 #[test]
 fn test_old_wrap_preserved_on_new_mint() {
+    env.mock_all_auths();
+    let new_pubkey = BytesN::from_array(&env, &[0u8; 32]);
+    client.update_admin_pubkey(&new_pubkey);
+}
+
+#[test]
+fn test_update_admin_pubkey_emits_event() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1164,4 +1245,25 @@ fn test_renew_all_ttls_before_init_fails() {
 
     let user = Address::generate(&env);
     client.renew_all_ttls(&user);
+    let signing_key = SigningKey::from_bytes(&[102u8; 32]);
+    let pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let new_pubkey = BytesN::from_array(&env, &[5u8; 32]);
+    client.update_admin_pubkey(&new_pubkey);
+
+    let events = env.events().all();
+    let last_event = events.last().expect("No events found");
+    let (_, topics, data) = last_event;
+
+    let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let emitted_key: BytesN<32> = data.try_into_val(&env).unwrap();
+
+    assert_eq!(t0, symbol_short!("admin"));
+    assert_eq!(t1, symbol_short!("pubkey"));
+    assert_eq!(emitted_key, new_pubkey);
 }
