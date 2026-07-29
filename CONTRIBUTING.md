@@ -25,6 +25,32 @@ You can also run hooks manually:
 - `pre-commit run --all-files`
 - `pre-commit run --hook-stage pre-push --all-files`
 
+**Step 2.2: Pull Request Checklist**
+
+Before opening a PR, confirm every item below:
+
+- [ ] The PR title references the issue number (e.g., `feat: add X (#123)`).
+- [ ] The PR description body contains `Closes #<issue-number>`.
+- [ ] All new or modified behavior is covered by tests in `src/test.rs`.
+- [ ] `cargo fmt --check` passes with no formatting differences.
+- [ ] `cargo clippy --all-targets -- -D warnings` passes with zero warnings.
+- [ ] `cargo test` passes and the full output is included in the PR description.
+- [ ] If the PR adds or changes a public function, the "Read methods" or "Write methods" documentation in `README.md` is updated.
+- [ ] If the PR changes contributor-facing workflow, `CONTRIBUTING.md` is updated.
+- [ ] No `unwrap()` or `expect()` in production code paths (test code is exempt).
+- [ ] All new public functions have `///` rustdoc comments.
+
+**Step 2.3: When to Update Documentation**
+
+Documentation updates are required alongside code changes in the following cases:
+
+* **New public function added**: Update the "Read methods" or "Write methods" section in `README.md` with the function's signature, return type, and behavior — including pre-initialization behavior if the function is callable before `initialize()` is called.
+* **Existing public function behavior changed**: Update the corresponding documentation in `README.md` to reflect the new behavior, return values, or error conditions.
+* **New error condition introduced**: If a function can now return a new error code or a new `None` case, document this in `README.md` and ensure `ERRORS.md` is current.
+* **Contributor workflow change**: If `CONTRIBUTING.md` describes a process that changes (e.g., a new CI check is added, a new hook is configured), update `CONTRIBUTING.md` to reflect the new workflow.
+
+**Example**: When adding a test that confirms `get_wrap` returns `None` before initialization (Issue #244), the "Read methods" documentation in `README.md` was updated to document this behavior for client developers.
+
 **Step 3: Submission**
 * Open a **Pull Request (PR)** to the `main` branch of the upstream repository.
 * Link this Issue in your PR description (e.g., "Closes #1").
