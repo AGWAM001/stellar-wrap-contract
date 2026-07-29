@@ -386,6 +386,7 @@ fn test_get_latest_wrap_no_wraps() {
     let pubkey = BytesN::from_array(&env, &[1u8; 32]);
     client.initialize(&admin, &pubkey);
 
+    // Verify that a new user has no wraps
     let user = Address::generate(&env);
     assert!(client.get_latest_wrap(&user).is_none());
 }
