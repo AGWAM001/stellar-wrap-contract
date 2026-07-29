@@ -97,6 +97,10 @@ impl StellarWrapContract {
         queries::get_latest_wrap(e, user)
     }
 
+    pub fn get_wraps(e: Env, user: Address, start: u32, limit: u32) -> soroban_sdk::Vec<WrapRecord> {
+        queries::get_wraps(e, user, start, limit)
+    }
+
     pub fn get_admin(e: Env) -> Option<Address> {
         queries::get_admin(e)
     }

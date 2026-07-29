@@ -97,6 +97,21 @@ pub(crate) fn mint_wrap(
             .extend_ttl(&latest_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
     }
 
+    let user_periods_key = DataKey::UserPeriods(user.clone());
+    let mut periods: soroban_sdk::Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&user_periods_key)
+        .unwrap_or(soroban_sdk::Vec::new(&e));
+    
+    if !periods.contains(period) {
+        periods.push_back(period);
+        e.storage().persistent().set(&user_periods_key, &periods);
+        e.storage()
+            .persistent()
+            .extend_ttl(&user_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+    }
+
     e.events()
         .publish((symbol_short!("mint"), user, period), archetype);
 }
