@@ -3,6 +3,7 @@
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
+mod constants;
 mod errors;
 mod mint;
 mod queries;

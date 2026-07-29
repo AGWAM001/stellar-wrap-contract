@@ -7,10 +7,11 @@ use super::*;
 
 use ed25519_dalek::{Signer, SigningKey};
 use proptest::prelude::*;
+use crate::constants::DOMAIN_SEPARATOR;
 use soroban_sdk::{
     testutils::Address as _,
     xdr::ToXdr,
-    Address, Bytes, BytesN, Env, Symbol,
+    Address, Bytes, BytesN, Env, String, Symbol,
 };
 
 // ── Shared test constants ────────────────────────────────────────────────────
@@ -70,6 +71,8 @@ fn sign_mint(
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
     let mut payload = Bytes::new(env);
+    // Domain separator binds signatures to this protocol version
+    payload.append(&String::from_str(env, DOMAIN_SEPARATOR).to_xdr(env));
     payload.append(&contract.to_xdr(env));
     payload.append(&user.clone().to_xdr(env));
     payload.append(&period.to_xdr(env));

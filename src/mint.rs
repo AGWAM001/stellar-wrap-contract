@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol,
+    panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Symbol,
 };
 
 use crate::{ContractError, DataKey, WrapRecord};
@@ -31,6 +31,9 @@ fn build_payload(
     data_hash: &BytesN<32>,
 ) -> Bytes {
     let mut payload = Bytes::new(e);
+    // Domain separator binds signatures to this protocol version,
+    // preventing replay across protocol upgrades.
+    payload.append(&String::from_str(e, crate::constants::DOMAIN_SEPARATOR).to_xdr(e));
     payload.append(&contract.to_xdr(e));
     payload.append(&user.clone().to_xdr(e));
     payload.append(&period.to_xdr(e));

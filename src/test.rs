@@ -4,6 +4,7 @@ extern crate std;
 
 use super::*;
 use ed25519_dalek::{Signer, SigningKey};
+use crate::constants::DOMAIN_SEPARATOR;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events},
@@ -24,6 +25,8 @@ fn sign_payload(
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
     let mut payload = Bytes::new(env);
+    // Domain separator must be prepended to bind signatures to this protocol version
+    payload.append(&String::from_str(env, DOMAIN_SEPARATOR).to_xdr(env));
     payload.append(&contract.to_xdr(env));
     payload.append(&user.clone().to_xdr(env));
     payload.append(&period.to_xdr(env));
@@ -661,4 +664,45 @@ fn test_get_admin_before_init_returns_none() {
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     assert!(client.get_admin().is_none());
+}
+
+/// Negative test: old-domain signatures (without domain separator) must be rejected.
+/// This proves domain separation protects against replay across protocol upgrades.
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_old_domain_signature_rejected() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[99u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    // Build a signature using the OLD payload format (no domain separator)
+    // This simulates a signature from a previous protocol version
+    let dummy_hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let mut old_payload = Bytes::new(&env);
+    old_payload.append(&contract_id.to_xdr(&env));
+    old_payload.append(&user.clone().to_xdr(&env));
+    old_payload.append(&period.to_xdr(&env));
+    old_payload.append(&archetype.clone().to_xdr(&env));
+    old_payload.append(&dummy_hash.clone().to_xdr(&env));
+
+    let mut out = [0u8; 512];
+    let len = old_payload.len() as usize;
+    old_payload.copy_into_slice(&mut out[..len]);
+    let sig = signing_key.sign(&out[..len]);
+    let old_signature = BytesN::from_array(&env, &sig.to_bytes());
+
+    // This should panic with InvalidSignature (#5) because the payload
+    // doesn't include the domain separator
+    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &old_signature);
 }
