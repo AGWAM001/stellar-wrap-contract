@@ -36,6 +36,13 @@ pub(crate) fn get_admin(e: Env) -> Option<Address> {
     e.storage().instance().get(&DataKey::Admin)
 }
 
+pub(crate) fn total_revoked(e: Env) -> u64 {
+    e.storage()
+        .instance()
+        .get::<_, u64>(&DataKey::TotalRevoked)
+        .unwrap_or(0)
+}
+
 pub(crate) fn name(e: Env) -> String {
     String::from_str(&e, "Stellar Wrap Registry")
 }
