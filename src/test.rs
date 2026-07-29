@@ -14,7 +14,6 @@ use std::vec::Vec;
 
 const STRESS_USER_COUNT: usize = 128;
 
-
 #[test]
 fn test_minting_flow() {
     let env = Env::default();
@@ -712,4 +711,399 @@ fn test_migrate_before_init_fails() {
     env.mock_all_auths();
 
     client.migrate(&1);
+}
+
+// --- Storage invariant tests ---
+
+fn read_stored_wrap(
+    env: &Env,
+    contract_id: &Address,
+    user: &Address,
+    period: u64,
+) -> Option<WrapRecord> {
+    let user = user.clone();
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Wrap(user.clone(), period))
+    })
+}
+
+fn read_stored_count(env: &Env, contract_id: &Address, user: &Address) -> u32 {
+    let user = user.clone();
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::WrapCount(user.clone()))
+            .unwrap_or(0)
+    })
+}
+
+fn read_latest_period(env: &Env, contract_id: &Address, user: &Address) -> u64 {
+    let user = user.clone();
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LatestPeriod(user.clone()))
+            .unwrap_or(0)
+    })
+}
+
+fn count_existing_wraps(
+    env: &Env,
+    contract_id: &Address,
+    user: &Address,
+    periods: &[u64],
+) -> usize {
+    let user = user.clone();
+    periods
+        .iter()
+        .filter(|&&p| {
+            env.as_contract(contract_id, || {
+                env.storage()
+                    .persistent()
+                    .has(&DataKey::Wrap(user.clone(), p))
+            })
+        })
+        .count()
+}
+
+#[test]
+fn storage_count_matches_existing_wraps_after_mints() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[20u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let periods = [202401, 202402, 202403, 202405, 202410];
+    let hash = BytesN::from_array(&env, &[99u8; 32]);
+
+    for &p in &periods {
+        let sig = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            p,
+            &archetype,
+            &hash,
+        );
+        client.mint_wrap(&user, &p, &archetype, &hash, &sig);
+    }
+
+    let stored_count = read_stored_count(&env, &contract_id, &user);
+    let actual_count = count_existing_wraps(&env, &contract_id, &user, &periods);
+    assert_eq!(
+        stored_count as usize, actual_count,
+        "stored count should match existing wraps"
+    );
+    assert_eq!(stored_count, periods.len() as u32);
+}
+
+#[test]
+fn storage_invariants_hold_after_out_of_order_mints() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[21u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[98u8; 32]);
+    let mint_order = [202405, 202403, 202406, 202401, 202404];
+
+    for &p in &mint_order {
+        let sig = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            p,
+            &archetype,
+            &hash,
+        );
+        client.mint_wrap(&user, &p, &archetype, &hash, &sig);
+    }
+
+    let stored_count = read_stored_count(&env, &contract_id, &user);
+    let actual_count = count_existing_wraps(&env, &contract_id, &user, &mint_order);
+    assert_eq!(stored_count as usize, actual_count);
+
+    let latest = read_latest_period(&env, &contract_id, &user);
+    assert_eq!(latest, 202406, "latest should be the max period minted");
+    assert!(
+        read_stored_wrap(&env, &contract_id, &user, latest).is_some(),
+        "latest period must have a stored wrap"
+    );
+}
+
+#[test]
+fn latest_period_references_existing_wrap() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[22u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[97u8; 32]);
+    let periods = [202401, 202402, 202403];
+
+    for &p in &periods {
+        let sig = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            p,
+            &archetype,
+            &hash,
+        );
+        client.mint_wrap(&user, &p, &archetype, &hash, &sig);
+    }
+
+    let latest = read_latest_period(&env, &contract_id, &user);
+    assert!(
+        read_stored_wrap(&env, &contract_id, &user, latest).is_some(),
+        "DataKey::LatestPeriod must point to a period with an existing Wrap record"
+    );
+    assert_eq!(latest, 202403);
+}
+
+#[test]
+fn duplicate_mint_preserves_counts_and_latest() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[23u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[96u8; 32]);
+    let period = 202401;
+
+    let sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+
+    let count_before = read_stored_count(&env, &contract_id, &user);
+    let latest_before = read_latest_period(&env, &contract_id, &user);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    }));
+    assert!(result.is_err());
+
+    let count_after = read_stored_count(&env, &contract_id, &user);
+    let latest_after = read_latest_period(&env, &contract_id, &user);
+    assert_eq!(
+        count_before, count_after,
+        "count unchanged after failed duplicate"
+    );
+    assert_eq!(
+        latest_before, latest_after,
+        "latest unchanged after failed duplicate"
+    );
+}
+
+#[test]
+fn storage_counts_are_independent_per_user() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[24u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[95u8; 32]);
+
+    let sig_a1 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_a,
+        202401,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(&user_a, &202401, &archetype, &hash, &sig_a1);
+
+    let sig_a2 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_a,
+        202402,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(&user_a, &202402, &archetype, &hash, &sig_a2);
+
+    let sig_b1 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_b,
+        202401,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(&user_b, &202401, &archetype, &hash, &sig_b1);
+
+    assert_eq!(
+        read_stored_count(&env, &contract_id, &user_a),
+        2,
+        "user_a has 2 wraps"
+    );
+    assert_eq!(
+        read_stored_count(&env, &contract_id, &user_b),
+        1,
+        "user_b has 1 wrap"
+    );
+    assert_eq!(read_latest_period(&env, &contract_id, &user_a), 202402);
+    assert_eq!(read_latest_period(&env, &contract_id, &user_b), 202401);
+}
+
+#[test]
+fn invalid_signature_does_not_change_storage() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[25u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    // No mock_all_auths - auth failure should prevent any storage changes
+
+    let hash = BytesN::from_array(&env, &[94u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let sig = BytesN::from_array(&env, &[0u8; 64]);
+
+    let count_before = read_stored_count(&env, &contract_id, &user);
+    let latest_before = read_latest_period(&env, &contract_id, &user);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    }));
+    assert!(result.is_err());
+
+    let count_after = read_stored_count(&env, &contract_id, &user);
+    let latest_after = read_latest_period(&env, &contract_id, &user);
+    assert_eq!(
+        count_before, count_after,
+        "count unchanged after invalid signature"
+    );
+    assert_eq!(
+        latest_before, latest_after,
+        "latest unchanged after invalid signature"
+    );
+}
+
+#[test]
+fn storage_invariant_newest_wrap_revoke_not_applicable() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[26u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[93u8; 32]);
+    let valid_periods = [202401, 202402, 202403];
+
+    for &p in &valid_periods {
+        let sig = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            p,
+            &archetype,
+            &hash,
+        );
+        client.mint_wrap(&user, &p, &archetype, &hash, &sig);
+    }
+
+    assert_eq!(read_stored_count(&env, &contract_id, &user), 3);
+    assert_eq!(read_latest_period(&env, &contract_id, &user), 202403);
+    assert!(read_stored_wrap(&env, &contract_id, &user, 202403).is_some());
+
+    let dup_sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202402,
+        &archetype,
+        &hash,
+    );
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap(&user, &202402, &archetype, &hash, &dup_sig);
+    }));
+    assert!(result.is_err());
+
+    assert_eq!(
+        read_stored_count(&env, &contract_id, &user),
+        3,
+        "count unchanged"
+    );
+    assert_eq!(
+        read_latest_period(&env, &contract_id, &user),
+        202403,
+        "latest unchanged"
+    );
+    assert!(
+        read_stored_wrap(&env, &contract_id, &user, 202403).is_some(),
+        "latest wrap exists"
+    );
 }

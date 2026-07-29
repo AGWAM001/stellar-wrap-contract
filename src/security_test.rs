@@ -14,7 +14,6 @@ use soroban_sdk::{
     Address, BytesN, Env,
 };
 
-
 /// Test 1: Replay Attack Simulation
 /// Ensures that a valid signature cannot be reused for the same period
 #[test]
