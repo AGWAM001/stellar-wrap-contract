@@ -380,6 +380,41 @@ fn test_verify_data_non_matching_hash() {
 }
 
 #[test]
+fn test_verify_data_corrupted_payload() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[6u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let original_data = Bytes::from_slice(&env, b"{\"valid\":true}");
+    let data_hash_raw = env.crypto().sha256(&original_data);
+    let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &data_hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+    let corrupted_data = Bytes::from_slice(&env, b"\x00\xFF\xFE\xFDcorrupt\x01\x02");
+    assert!(!client.verify_data(&user, &period, &corrupted_data));
+}
+
+#[test]
 fn test_verify_data_no_wrap_exists() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
