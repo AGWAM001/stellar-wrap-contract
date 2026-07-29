@@ -87,9 +87,9 @@ thread 'main' panicked at 'Error(Contract, #8)'
 
 `mint_wrap` reconstructs a canonical payload as:
 
-`contract_id ‖ user ‖ period ‖ archetype ‖ data_hash`
+`0x01 ‖ contract_id ‖ user ‖ period ‖ archetype ‖ data_hash`
 
-Then verifies an Ed25519 signature over that payload using the stored `admin_pubkey`.
+Then verifies an Ed25519 signature over that payload using the stored `admin_pubkey`. Old signatures generated without the version byte will fail verification after this migration.
 
 Troubleshooting checklist for `Error(Contract, #6)`:
 - Ensure `contract_id` in your signing process matches the deployed contract you are calling.

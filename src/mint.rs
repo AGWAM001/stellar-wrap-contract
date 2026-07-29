@@ -22,6 +22,8 @@ fn get_admin_pubkey(e: &Env) -> BytesN<32> {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
 
+pub(crate) const MINT_SIGNATURE_PAYLOAD_VERSION: u8 = 1;
+
 fn build_payload(
     e: &Env,
     contract: &Address,
@@ -31,6 +33,7 @@ fn build_payload(
     data_hash: &BytesN<32>,
 ) -> Bytes {
     let mut payload = Bytes::new(e);
+    payload.append(&Bytes::from_array(e, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
     payload.append(&contract.to_xdr(e));
     payload.append(&user.clone().to_xdr(e));
     payload.append(&period.to_xdr(e));
