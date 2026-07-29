@@ -5,6 +5,7 @@ use soroban_sdk::{
 use crate::{ContractError, DataKey, WrapRecord};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
+pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 
 fn validate_period(e: &Env, period: u64) {
     let year = period / 100;
@@ -12,6 +13,12 @@ fn validate_period(e: &Env, period: u64) {
 
     if year < 2024 || year > 2100 || month < 1 || month > 12 {
         panic_with_error!(e, ContractError::InvalidPeriod);
+    }
+}
+
+fn validate_payload_version(e: &Env, version: u32) {
+    if version != CURRENT_PAYLOAD_VERSION {
+        panic_with_error!(e, ContractError::InvalidSignature);
     }
 }
 
@@ -29,8 +36,10 @@ fn build_payload(
     period: u64,
     archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
 ) -> Bytes {
     let mut payload = Bytes::new(e);
+    payload.append(&payload_version.to_xdr(e));
     payload.append(&contract.to_xdr(e));
     payload.append(&user.clone().to_xdr(e));
     payload.append(&period.to_xdr(e));
@@ -45,10 +54,12 @@ pub(crate) fn mint_wrap(
     period: u64,
     archetype: Symbol,
     data_hash: BytesN<32>,
+    payload_version: u32,
     signature: BytesN<64>,
 ) {
     user.require_auth();
     validate_period(&e, period);
+    validate_payload_version(&e, payload_version);
 
     let admin_pubkey = get_admin_pubkey(&e);
     let payload = build_payload(
@@ -58,6 +69,7 @@ pub(crate) fn mint_wrap(
         period,
         &archetype,
         &data_hash,
+        payload_version,
     );
 
     e.crypto()

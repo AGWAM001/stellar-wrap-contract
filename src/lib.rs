@@ -30,9 +30,10 @@ impl StellarWrapContract {
         period: u64,
         archetype: Symbol,
         data_hash: BytesN<32>,
+        payload_version: u32,
         signature: BytesN<64>,
     ) {
-        mint::mint_wrap(e, user, period, archetype, data_hash, signature);
+        mint::mint_wrap(e, user, period, archetype, data_hash, payload_version, signature);
     }
 
     pub fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
