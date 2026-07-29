@@ -116,6 +116,80 @@ fn test_mint_emits_event() {
 }
 
 #[test]
+fn test_revoke_emits_event_multi_user() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[14u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype_a = symbol_short!("gold");
+    let archetype_b = symbol_short!("silvr");
+    let hash = BytesN::from_array(&env, &[1u8; 32]);
+    let period_a = 202401u64;
+    let period_b = 202402u64;
+
+    let sig_a = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_a,
+        period_a,
+        &archetype_a,
+        &hash,
+    );
+    let sig_b = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_b,
+        period_b,
+        &archetype_b,
+        &hash,
+    );
+
+    client.mint_wrap(&user_a, &period_a, &archetype_a, &hash, &sig_a);
+    client.mint_wrap(&user_b, &period_b, &archetype_b, &hash, &sig_b);
+    client.revoke_wrap(&user_a, &period_a);
+    client.revoke_wrap(&user_b, &period_b);
+
+    let events = env.events().all();
+
+    let revoke_events: Vec<_> = events
+        .iter()
+        .filter(|(topic, _, _)| {
+            let sym: Symbol = topic.get(0).unwrap().try_into_val(&env).unwrap();
+            sym == symbol_short!("revoke")
+        })
+        .collect();
+
+    assert_eq!(revoke_events.len(), 2);
+
+    let (_, topics_a, data_a) = revoke_events[0];
+    let event_user_a: Address = topics_a.get(1).unwrap().try_into_val(&env).unwrap();
+    let event_period_a: u64 = topics_a.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_archetype_a: Symbol = data_a.try_into_val(&env).unwrap();
+    assert_eq!(event_user_a, user_a);
+    assert_eq!(event_period_a, period_a);
+    assert_eq!(event_archetype_a, archetype_a);
+
+    let (_, topics_b, data_b) = revoke_events[1];
+    let event_user_b: Address = topics_b.get(1).unwrap().try_into_val(&env).unwrap();
+    let event_period_b: u64 = topics_b.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_archetype_b: Symbol = data_b.try_into_val(&env).unwrap();
+    assert_eq!(event_user_b, user_b);
+    assert_eq!(event_period_b, period_b);
+    assert_eq!(event_archetype_b, archetype_b);
+}
+
+#[test]
 fn test_balance_of_and_count() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);

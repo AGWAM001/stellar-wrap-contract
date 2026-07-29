@@ -6,6 +6,7 @@ mod admin;
 mod errors;
 mod mint;
 mod queries;
+mod revoke;
 mod storage_types;
 
 pub use errors::ContractError;
@@ -33,6 +34,10 @@ impl StellarWrapContract {
         signature: BytesN<64>,
     ) {
         mint::mint_wrap(e, user, period, archetype, data_hash, signature);
+    }
+
+    pub fn revoke_wrap(e: Env, user: Address, period: u64) {
+        revoke::revoke_wrap(e, user, period);
     }
 
     pub fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
