@@ -662,3 +662,22 @@ fn test_get_admin_before_init_returns_none() {
 
     assert!(client.get_admin().is_none());
 }
+
+/// Verifies that `get_wrap` can be safely called before the contract is initialized.
+/// 
+/// Before initialization, no wrap records exist in persistent storage.
+/// This test confirms that `get_wrap` returns `None` rather than panicking,
+/// allowing client developers to query wrap state without requiring an
+/// initialization guard.
+#[test]
+fn test_get_wrap_returns_none_before_initialization() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let period = 202401u64;
+
+    let result = client.get_wrap(&user, &period);
+    assert!(result.is_none());
+}
