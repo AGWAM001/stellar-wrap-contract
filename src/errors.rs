@@ -37,5 +37,6 @@ pub enum ContractError {
     ProposalVotingPeriodEnded = 29,
     ProposalDefeated = 30,
     InvalidProposalDuration = 31,
+    UserOptedOut = 32,
 }
 
