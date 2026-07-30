@@ -2840,3 +2840,352 @@ fn test_burn_wrap_multiple_users_independent() {
     // User B's wrap should still exist (independent)
     assert!(client.get_wrap(&user_b, &period).is_some());
 }
+
+/// Comprehensive unit tests for verify_data function.
+/// Tests the core requirement: verify_data must return true for correct data payloads
+/// that match the hash stored during minting.
+mod verify_data_unit_tests {
+    use super::*;
+
+    /// Helper function to set up a standard test environment
+    /// Returns: (Env, contract_id, client, signing_key, admin, user)
+    fn setup_env() -> (Env, Address, StellarWrapContractClient, SigningKey, Address, Address) {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[15u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(&admin, &admin_pubkey);
+        env.mock_all_auths();
+
+        (env, contract_id, client, signing_key, admin, user)
+    }
+
+    /// PRIMARY TEST: Verifies that verify_data returns true when given a correct,
+    /// well-formed data payload that matches the stored hash.
+    /// This is the core requirement from issue #483.
+    #[test]
+    fn verify_data_succeeds_with_correct_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        // Build a correct payload matching JSON data
+        let correct_payload = Bytes::from_slice(&env, b"{\"user_id\":123,\"status\":\"active\",\"level\":10}");
+        
+        // Compute the hash that will be stored in the wrap record
+        let data_hash_raw = env.crypto().sha256(&correct_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("gold");
+        let period = 202401u64;
+
+        // Sign and mint the wrap with this hash
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Verify that passing the exact same correct payload returns true
+        let result = client.verify_data(&user, &period, &correct_payload);
+        assert!(result, "verify_data must return true for the correct payload that matches the stored hash");
+    }
+
+    /// Verifies that verify_data handles complex JSON payloads correctly
+    /// and maintains deterministic behavior with correct data.
+    #[test]
+    fn verify_data_succeeds_with_complex_json_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        // Build a complex, nested JSON payload
+        let complex_payload = Bytes::from_slice(
+            &env,
+            b"{\"profile\":{\"name\":\"Alice\",\"age\":30},\"scores\":[100,95,87],\"metadata\":{\"created\":\"2024-01-15\",\"verified\":true}}"
+        );
+        
+        let data_hash_raw = env.crypto().sha256(&complex_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("standard");
+        let period = 202402u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Verify the exact same complex payload succeeds
+        let result = client.verify_data(&user, &period, &complex_payload);
+        assert!(result, "verify_data must correctly verify complex JSON payloads");
+    }
+
+    /// Verifies that verify_data rejects a payload with modified content
+    #[test]
+    fn verify_data_fails_with_incorrect_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        let original_payload = Bytes::from_slice(&env, b"{\"score\":100,\"rank\":\"gold\"}");
+        
+        let data_hash_raw = env.crypto().sha256(&original_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("verify");
+        let period = 202403u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Try to verify with a tampered/different payload
+        let incorrect_payload = Bytes::from_slice(&env, b"{\"score\":999,\"rank\":\"platinum\"}");
+        let result = client.verify_data(&user, &period, &incorrect_payload);
+        
+        assert!(!result, "verify_data must return false for incorrect/tampered payload");
+    }
+
+    /// Verifies that verify_data handles empty/minimal payloads correctly
+    #[test]
+    fn verify_data_handles_minimal_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        // Create a minimal empty JSON object payload
+        let minimal_payload = Bytes::from_slice(&env, b"{}");
+        
+        let data_hash_raw = env.crypto().sha256(&minimal_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("minimal");
+        let period = 202404u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Verify that the minimal payload works correctly
+        let result = client.verify_data(&user, &period, &minimal_payload);
+        assert!(result, "verify_data must correctly handle minimal/empty payloads");
+    }
+
+    /// Verifies that verify_data is deterministic —
+    /// calling verify_data multiple times with the same correct payload
+    /// always returns the same result
+    #[test]
+    fn verify_data_is_deterministic_with_correct_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        let payload = Bytes::from_slice(&env, b"{\"deterministic\":true,\"value\":42}");
+        
+        let data_hash_raw = env.crypto().sha256(&payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("determ");
+        let period = 202405u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Call verify_data multiple times with the same payload
+        let result1 = client.verify_data(&user, &period, &payload);
+        let result2 = client.verify_data(&user, &period, &payload);
+        let result3 = client.verify_data(&user, &period, &payload);
+
+        assert!(result1, "First call must succeed");
+        assert!(result2, "Second call must succeed");
+        assert!(result3, "Third call must succeed");
+        assert_eq!(result1, result2, "verify_data must be deterministic");
+        assert_eq!(result2, result3, "verify_data must be deterministic");
+    }
+
+    /// Verifies that verify_data correctly distinguishes between 
+    /// different correct payloads for different periods
+    #[test]
+    fn verify_data_distinguishes_different_periods() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        let payload1 = Bytes::from_slice(&env, b"{\"period\":1,\"data\":\"first\"}");
+        let payload2 = Bytes::from_slice(&env, b"{\"period\":2,\"data\":\"second\"}");
+        
+        let hash1_raw = env.crypto().sha256(&payload1);
+        let hash1 = BytesN::from_array(&env, &hash1_raw.to_array());
+        
+        let hash2_raw = env.crypto().sha256(&payload2);
+        let hash2 = BytesN::from_array(&env, &hash2_raw.to_array());
+        
+        let archetype = symbol_short!("multi");
+        let period1 = 202406u64;
+        let period2 = 202407u64;
+
+        let sig1 = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period1,
+            &archetype,
+            &hash1,
+        );
+        let sig2 = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period2,
+            &archetype,
+            &hash2,
+        );
+
+        client.mint_wrap(&user, &period1, &archetype, &hash1, &sig1);
+        client.mint_wrap(&user, &period2, &archetype, &hash2, &sig2);
+
+        // Verify correct payload for each period
+        assert!(
+            client.verify_data(&user, &period1, &payload1),
+            "Period 1 must verify with its correct payload"
+        );
+        assert!(
+            client.verify_data(&user, &period2, &payload2),
+            "Period 2 must verify with its correct payload"
+        );
+
+        // Cross-verify should fail (wrong payload for period)
+        assert!(
+            !client.verify_data(&user, &period1, &payload2),
+            "Period 1 must reject payload from period 2"
+        );
+        assert!(
+            !client.verify_data(&user, &period2, &payload1),
+            "Period 2 must reject payload from period 1"
+        );
+    }
+
+    /// Verifies that verify_data handles binary data (non-UTF8) correctly
+    #[test]
+    fn verify_data_succeeds_with_binary_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        // Create binary payload with non-UTF8 bytes
+        let binary_payload = Bytes::from_slice(&env, b"\x00\x01\x02\xFF\xFE\xFD");
+        
+        let data_hash_raw = env.crypto().sha256(&binary_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("binary");
+        let period = 202408u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Verify that the exact binary payload matches
+        let result = client.verify_data(&user, &period, &binary_payload);
+        assert!(result, "verify_data must correctly verify binary payloads");
+    }
+
+    /// Verifies that verify_data rejects binary data with even a single bit difference
+    #[test]
+    fn verify_data_fails_with_single_byte_difference() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        let original_binary = Bytes::from_slice(&env, b"\x00\x01\x02\x03\x04");
+        
+        let data_hash_raw = env.crypto().sha256(&original_binary);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("bitdiff");
+        let period = 202409u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Try with one byte changed (0x02 -> 0x03 at index 2)
+        let tampered_binary = Bytes::from_slice(&env, b"\x00\x01\x03\x03\x04");
+        let result = client.verify_data(&user, &period, &tampered_binary);
+        
+        assert!(!result, "verify_data must reject payload with even a single byte changed");
+    }
+
+    /// Verifies that verify_data handles very large payloads correctly
+    #[test]
+    fn verify_data_succeeds_with_large_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        // Create a large payload (1KB of repeated data)
+        let mut large_bytes = vec![0u8; 1024];
+        for (i, byte) in large_bytes.iter_mut().enumerate() {
+            *byte = (i % 256) as u8;
+        }
+        let large_payload = Bytes::from_slice(&env, &large_bytes);
+        
+        let data_hash_raw = env.crypto().sha256(&large_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+        
+        let archetype = symbol_short!("large");
+        let period = 202410u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+
+        // Verify the large payload matches
+        let result = client.verify_data(&user, &period, &large_payload);
+        assert!(result, "verify_data must correctly verify large payloads");
+    }
+}
