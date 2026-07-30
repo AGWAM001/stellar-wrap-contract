@@ -369,6 +369,15 @@ impl token::TokenInterface for StellarWrapContract {
     }
 }
 
+// #[cfg(test)]
+// mod security_test;
+// #[cfg(test)]
+// mod test;
+// #[cfg(test)]
+// mod test_utils;
+
+#[cfg(test)]
+mod balance_of_test;
 #[cfg(test)]
 mod oracle_test;
 #[cfg(test)]
