@@ -18,4 +18,25 @@ pub enum ContractError {
     Paused = 12,
     ArithmeticOverflow = 13,
     InvalidFeeParams = 14,
+    BatchEmpty = 15,
+    BatchTooLarge = 16,
+    DuplicateBatchEntry = 17,
+    // Staking errors
+    StakeTooLow = 18,
+    StakeNotFound = 19,
+    StakeCooldownActive = 20,
+    StakeNotUnstaking = 21,
+    StakeCooldownNotElapsed = 22,
+    InvalidStakeConfig = 23,
+    StakeArithmeticOverflow = 24,
+    // Governance proposal errors
+    ProposalNotFound = 25,
+    ProposalNotActive = 26,
+    ProposalAlreadyVoted = 27,
+    ProposalVotingPeriodNotEnded = 28,
+    ProposalVotingPeriodEnded = 29,
+    ProposalDefeated = 30,
+    InvalidProposalDuration = 31,
+    UserOptedOut = 32,
 }
+

@@ -1,0 +1,493 @@
+#![cfg(test)]
+
+extern crate std;
+
+use super::*;
+use soroban_sdk::{
+    symbol_short,
+    testutils::{Address as _, Events},
+    Address, BytesN, Env,
+};
+
+// ── Stake tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_stake_basic_flow() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Initially no stake
+    assert!(client.get_stake(&user).is_none());
+    assert_eq!(client.total_staked(), 0);
+    assert_eq!(client.get_stake_priority(&user), 0);
+
+    // Stake 500 tokens
+    client.stake(&user, &500);
+    let record = client.get_stake(&user).unwrap();
+    assert_eq!(record.amount, 500);
+    assert_eq!(record.unstaking_at, 0);
+    assert!(record.staked_at > 0);
+    assert_eq!(client.total_staked(), 500);
+}
+
+#[test]
+fn test_stake_multiple_times_accumulates() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user, &100);
+    client.stake(&user, &200);
+    client.stake(&user, &300);
+
+    let record = client.get_stake(&user).unwrap();
+    assert_eq!(record.amount, 600);
+    assert_eq!(client.total_staked(), 600);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_stake_below_minimum_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Default min_stake is 100, try staking 50
+    client.stake(&user, &50);
+}
+
+#[test]
+fn test_unstake_and_withdraw_flow() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user, &1000);
+
+    // Initiate unstake
+    client.unstake(&user);
+    let record = client.get_stake(&user).unwrap();
+    assert_eq!(record.amount, 1000);
+    assert!(record.unstaking_at > 0);
+
+    // Priority should be 0 during unstaking
+    assert_eq!(client.get_stake_priority(&user), 0);
+
+    // Advance time past cooldown (default 7 days = 604800 seconds)
+    env.ledger().with_mut(|li| {
+        li.timestamp = li.timestamp + 604801;
+    });
+
+    // Withdraw
+    client.withdraw_stake(&user);
+    assert!(client.get_stake(&user).is_none());
+    assert_eq!(client.total_staked(), 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #19)")]
+fn test_withdraw_before_cooldown_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user, &1000);
+    client.unstake(&user);
+
+    // Try to withdraw immediately (no time passed)
+    client.withdraw_stake(&user);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #16)")]
+fn test_unstake_nonexistent_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.unstake(&user);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")]
+fn test_double_unstake_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user, &500);
+    client.unstake(&user);
+    client.unstake(&user); // Should panic: cooldown already active
+}
+
+#[test]
+fn test_stake_priority_computation() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Default config: min_stake=100, multiplier=1000bps (10%), max=5000bps (50%)
+    // Stake 100 -> 1x min_stake -> priority = 1 * 1000 = 1000 bps (10%)
+    client.stake(&user, &100);
+    assert_eq!(client.get_stake_priority(&user), 1000);
+
+    // Add more -> 300 total -> 3x min_stake -> 3000 bps (30%)
+    client.stake(&user, &200);
+    assert_eq!(client.get_stake_priority(&user), 3000);
+
+    // Add more -> 600 total -> 6x min_stake -> capped at 5000 bps (50%)
+    client.stake(&user, &300);
+    assert_eq!(client.get_stake_priority(&user), 5000);
+}
+
+#[test]
+fn test_stake_priority_zero_for_non_staker() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+
+    assert_eq!(client.get_stake_priority(&user), 0);
+}
+
+#[test]
+fn test_stake_config_defaults() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+
+    let config = client.get_stake_config();
+    assert_eq!(config.min_stake, 100);
+    assert_eq!(config.cooldown_seconds, 7 * 24 * 60 * 60);
+    assert_eq!(config.priority_multiplier_bps, 1000);
+    assert_eq!(config.max_priority_bps, 5000);
+}
+
+#[test]
+fn test_admin_set_stake_config() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let new_config = StakeConfig {
+        min_stake: 200,
+        cooldown_seconds: 3600, // 1 hour
+        priority_multiplier_bps: 500,  // 5% per min_stake unit
+        max_priority_bps: 3000, // 30% max
+    };
+    client.set_stake_config(&new_config);
+
+    let config = client.get_stake_config();
+    assert_eq!(config.min_stake, 200);
+    assert_eq!(config.cooldown_seconds, 3600);
+    assert_eq!(config.priority_multiplier_bps, 500);
+    assert_eq!(config.max_priority_bps, 3000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_invalid_stake_config_zero_min_stake_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let bad_config = StakeConfig {
+        min_stake: 0,
+        cooldown_seconds: 3600,
+        priority_multiplier_bps: 500,
+        max_priority_bps: 3000,
+    };
+    client.set_stake_config(&bad_config);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_invalid_stake_config_max_bps_exceeds_10000_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let bad_config = StakeConfig {
+        min_stake: 100,
+        cooldown_seconds: 3600,
+        priority_multiplier_bps: 500,
+        max_priority_bps: 10001,
+    };
+    client.set_stake_config(&bad_config);
+}
+
+#[test]
+fn test_total_staked_multi_user() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let user_c = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user_a, &100);
+    client.stake(&user_b, &200);
+    client.stake(&user_c, &300);
+
+    assert_eq!(client.total_staked(), 600);
+
+    // Unstake and withdraw one
+    client.unstake(&user_b);
+    env.ledger().with_mut(|li| {
+        li.timestamp = li.timestamp + 604801;
+    });
+    client.withdraw_stake(&user_b);
+
+    assert_eq!(client.total_staked(), 400);
+}
+
+#[test]
+fn test_discounted_fee_with_stake() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Set up a fee model so there's a non-zero fee
+    let fee_params = storage_types::FeeParams {
+        base_fee: 1000,
+        per_kib_fee: 100,
+        scale_step_kib: 1,
+        max_fee: 10000,
+    };
+    client.set_fee_params(&fee_params);
+
+    // No stake -> no discount
+    let fee_no_stake = client.get_discounted_fee(&user);
+    let raw_fee = client.current_fee();
+    assert_eq!(fee_no_stake, raw_fee);
+
+    // Stake to get ~10% discount (1000 bps priority)
+    client.stake(&user, &100); // 1x min_stake -> 1000 bps = 10%
+    let fee_with_stake = client.get_discounted_fee(&user);
+    assert!(fee_with_stake < fee_no_stake);
+}
+
+#[test]
+fn test_discounted_fee_zero_when_raw_fee_zero() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Default fee params have base_fee=0 and per_kib_fee=0 -> fee = 0
+    client.stake(&user, &500);
+
+    let discounted = client.get_discounted_fee(&user);
+    assert_eq!(discounted, 0);
+}
+
+#[test]
+fn test_stake_events_emitted() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user, &500);
+
+    let events = env.events().all();
+    // Find the stake event
+    let stake_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            let topics = &e.1;
+            if topics.len() >= 2 {
+                let t0: Result<soroban_sdk::Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
+                t0.map_or(false, |s| s == symbol_short!("stake"))
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    assert!(!stake_events.is_empty(), "Expected at least one stake event");
+}
+
+#[test]
+fn test_cannot_stake_during_unstaking() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user, &200);
+    client.unstake(&user);
+
+    // Try to stake more during unstaking period — should fail
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.stake(&user, &100);
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_re_stake_after_withdraw() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // First stake
+    client.stake(&user, &500);
+    assert_eq!(client.get_stake(&user).unwrap().amount, 500);
+
+    // Unstake and withdraw
+    client.unstake(&user);
+    env.ledger().with_mut(|li| {
+        li.timestamp = li.timestamp + 604801;
+    });
+    client.withdraw_stake(&user);
+    assert!(client.get_stake(&user).is_none());
+
+    // Re-stake after withdrawal
+    client.stake(&user, &300);
+    let record = client.get_stake(&user).unwrap();
+    assert_eq!(record.amount, 300);
+    assert_eq!(record.unstaking_at, 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #18)")]
+fn test_withdraw_without_unstake_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.stake(&user, &500);
+    // Call withdraw without calling unstake first
+    client.withdraw_stake(&user);
+}
