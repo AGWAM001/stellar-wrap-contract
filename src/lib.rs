@@ -8,29 +8,16 @@ use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, S
 mod admin;
 mod errors;
 mod mint;
+mod oracle;
 mod queries;
 mod storage_types;
 
 pub use errors::ContractError;
+pub use oracle::DataHashOracle;
 pub use storage_types::{ContractHealth, DataKey, WrapRecord};
 
 #[contract]
 pub struct StellarWrapContract;
-use soroban_sdk::{
-    contracterror,
-    panic_with_error,
-    symbol_short,
-    Address, BytesN, Env, Symbol,
-};
-
-/// Errors returned by the StellarWrap contract.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum ContractError {
-    /// A wrap record for this `(user, period)` pair already exists. (code 4)
-    WrapAlreadyExists = 4,
-}
 
 #[contractimpl]
 impl StellarWrapContract {
@@ -61,17 +48,6 @@ impl StellarWrapContract {
         signature: BytesN<64>,
     ) {
         mint::mint_wrap(e, user, period, archetype, data_hash, signature);
-        let key = (user.clone(), period);
-        if e.storage().persistent().has(&key) {
-            panic_with_error!(e, ContractError::WrapAlreadyExists);
-        }
-        let record = WrapRecord {
-            timestamp: e.ledger().timestamp(),
-            data_hash,
-            archetype,
-            period,
-        };
-        e.storage().persistent().set(&key, &record);
     }
 
     pub fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
@@ -91,6 +67,14 @@ impl StellarWrapContract {
 
     pub fn verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool {
         queries::verify_data(e, user, period, data)
+    }
+
+    /// Asks an external oracle contract whether `data_hash` is recognized.
+    ///
+    /// The oracle must expose `verify_data_hash(BytesN<32>) -> bool`.
+    /// Oracle invocation and ABI errors propagate to the caller.
+    pub fn verify_with_oracle(e: Env, oracle: Address, data_hash: BytesN<32>) -> bool {
+        oracle::verify_data_hash(&e, &oracle, &data_hash)
     }
 
     pub fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
@@ -118,6 +102,8 @@ impl StellarWrapContract {
     }
 }
 
+#[cfg(test)]
+mod oracle_test;
 #[cfg(test)]
 mod security_test;
 #[cfg(test)]

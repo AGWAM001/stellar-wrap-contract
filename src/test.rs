@@ -14,7 +14,6 @@ use std::vec::Vec;
 
 const STRESS_USER_COUNT: usize = 128;
 
-
 #[test]
 fn test_minting_flow() {
     let env = Env::default();
@@ -667,7 +666,6 @@ fn test_get_admin_before_init_returns_none() {
 
 #[test]
 fn test_migrate_applies_once_per_version() {
-fn test_get_mint_timestamp_exists() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -690,6 +688,26 @@ fn test_get_mint_timestamp_exists() {
 #[test]
 #[should_panic(expected = "Error(Contract, #7)")]
 fn test_migrate_rejects_replay() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    client.migrate(&1);
+    client.migrate(&1);
+}
+
+#[test]
+fn test_get_mint_timestamp_exists() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
     let signing_key = SigningKey::from_bytes(&[14u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
@@ -726,14 +744,10 @@ fn test_get_mint_timestamp_missing() {
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
-    let admin = Address::generate(&env);
-    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    let user = Address::generate(&env);
+    let period = 202401u64;
 
-    client.initialize(&admin, &pubkey);
-    env.mock_all_auths();
-
-    client.migrate(&1);
-    client.migrate(&1);
+    assert_eq!(client.get_mint_timestamp(&user, &period), None);
 }
 
 #[test]
@@ -745,8 +759,4 @@ fn test_migrate_before_init_fails() {
     env.mock_all_auths();
 
     client.migrate(&1);
-    let user = Address::generate(&env);
-    let period = 202401u64;
-
-    assert_eq!(client.get_mint_timestamp(&user, &period), None);
 }
