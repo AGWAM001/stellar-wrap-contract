@@ -39,8 +39,42 @@ pub(crate) fn verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bo
 
 pub(crate) fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
     let latest_key = DataKey::LatestPeriod(user.clone());
-    let period: u64 = e.storage().persistent().get(&latest_key)?;
-    e.storage().persistent().get(&DataKey::Wrap(user, period))
+    if let Some(period) = e.storage().persistent().get::<_, u64>(&latest_key) {
+        if let Some(wrap) = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Wrap(user.clone(), period))
+        {
+            return Some(wrap);
+        }
+    }
+
+    // A revoked latest record clears the marker but leaves older periods intact.
+    let periods: soroban_sdk::Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&DataKey::UserPeriods(user.clone()))?;
+    let mut latest: Option<WrapRecord> = None;
+
+    for index in 0..periods.len() {
+        if let Some(period) = periods.get(index) {
+            if let Some(wrap) = e
+                .storage()
+                .persistent()
+                .get::<_, WrapRecord>(&DataKey::Wrap(user.clone(), period))
+            {
+                let is_newer = match latest.as_ref() {
+                    None => true,
+                    Some(current) => wrap.period > current.period,
+                };
+                if is_newer {
+                    latest = Some(wrap);
+                }
+            }
+        }
+    }
+
+    latest
 }
 
 pub(crate) fn get_wraps(
