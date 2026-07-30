@@ -20,6 +20,7 @@ extern crate std;
 use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
+mod alias;
 mod errors;
 mod mint;
 mod queries;
@@ -217,6 +218,20 @@ impl StellarWrapContract {
 
     pub fn health(e: Env) -> ContractHealth {
         queries::health(e)
+    }
+
+    /// Set or update the caller's alias hash.
+    ///
+    /// Only the `user` themselves can call this — `require_auth` is enforced
+    /// inside the alias module. The hash is stored as opaque 32-byte data so
+    /// no raw personal information ever touches the chain.
+    pub fn set_alias_hash(e: Env, user: Address, alias_hash: BytesN<32>) {
+        alias::set_alias_hash(e, user, alias_hash);
+    }
+
+    /// Return the alias hash for `user`, or `None` if one has not been set.
+    pub fn get_alias_hash(e: Env, user: Address) -> Option<BytesN<32>> {
+        alias::get_alias_hash(e, user)
     }
 
     pub fn name(e: Env) -> String {

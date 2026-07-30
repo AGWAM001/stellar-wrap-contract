@@ -1666,6 +1666,12 @@ fn test_mint_wrap_max_hash_succeeds() {
 #[test]
 #[should_panic(expected = "Error(Contract, #3)")]
 fn test_upgrade_requires_admin_auth() {
+// ---------------------------------------------------------------------------
+// Alias hash tests (#288)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_set_and_get_alias_hash() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -2023,6 +2029,20 @@ fn test_fsm_transition_nonexistent_wrap_fails() {
 #[test]
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn test_update_admin_pubkey_requires_admin_auth() {
+    let user = Address::generate(&env);
+    let alias_hash = BytesN::from_array(&env, &[0xabu8; 32]);
+
+    // No hash set yet
+    assert!(client.get_alias_hash(&user).is_none());
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user, &alias_hash);
+
+    assert_eq!(client.get_alias_hash(&user).unwrap(), alias_hash);
+}
+
+#[test]
+fn test_update_alias_hash() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -2111,6 +2131,24 @@ fn test_revoke_wrap_before_init_fails() {
 
 #[test]
 fn test_revoke_latest_period_clears_latest() {
+    let pubkey = BytesN::from_array(&env, &[2u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let user = Address::generate(&env);
+    let hash_v1 = BytesN::from_array(&env, &[0x11u8; 32]);
+    let hash_v2 = BytesN::from_array(&env, &[0x22u8; 32]);
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user, &hash_v1);
+    assert_eq!(client.get_alias_hash(&user).unwrap(), hash_v1);
+
+    // Overwrite with a new hash
+    client.set_alias_hash(&user, &hash_v2);
+    assert_eq!(client.get_alias_hash(&user).unwrap(), hash_v2);
+}
+
+#[test]
+fn test_alias_hash_is_per_user() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -2249,6 +2287,30 @@ fn test_renew_all_ttls_extends_metadata() {
 
 #[test]
 fn test_remint_after_revoke_succeeds() {
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[3u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let hash_a = BytesN::from_array(&env, &[0xaau8; 32]);
+    let hash_b = BytesN::from_array(&env, &[0xbbu8; 32]);
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user_a, &hash_a);
+    client.set_alias_hash(&user_b, &hash_b);
+
+    assert_eq!(client.get_alias_hash(&user_a).unwrap(), hash_a);
+    assert_eq!(client.get_alias_hash(&user_b).unwrap(), hash_b);
+    // Ensure they are distinct
+    assert_ne!(
+        client.get_alias_hash(&user_a).unwrap(),
+        client.get_alias_hash(&user_b).unwrap()
+    );
+}
+
+#[test]
+fn test_get_alias_hash_returns_none_for_unknown_user() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -2278,6 +2340,8 @@ fn test_remint_after_revoke_succeeds() {
     // Metadata still accessible after renewal
     assert_eq!(client.balance_of(&user), 1);
     assert!(client.get_latest_wrap(&user).is_some());
+    let unknown_user = Address::generate(&env);
+    assert!(client.get_alias_hash(&unknown_user).is_none());
 }
 
 #[test]
@@ -2438,4 +2502,14 @@ fn test_upgrade_before_init_fails() {
     let (_, _, data) = last_event;
     let event_reason: BytesN<32> = data.try_into_val(&env).unwrap();
     assert_eq!(event_reason, reason_hash);
+fn test_set_alias_hash_requires_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    // Do NOT call env.mock_all_auths() — auth must be required
+    let user = Address::generate(&env);
+    let alias_hash = BytesN::from_array(&env, &[0xccu8; 32]);
+
+    client.set_alias_hash(&user, &alias_hash);
 }
