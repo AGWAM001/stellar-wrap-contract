@@ -39,6 +39,7 @@ pub(crate) fn mint_wrap(
     payload_version: u32,
     signature: BytesN<64>,
 ) {
+    crate::admin::require_not_paused(&e);
     user.require_auth();
     validate_period(&e, period);
     validate_payload_version(&e, payload_version);
@@ -125,6 +126,7 @@ pub(crate) fn transition_wrap_state(
     period: u64,
     next_state: WrapState,
 ) {
+    crate::admin::require_not_paused(&e);
     user.require_auth();
 
     let wrap_key = DataKey::Wrap(user.clone(), period);

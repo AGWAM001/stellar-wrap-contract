@@ -90,8 +90,6 @@ pub enum DataKey {
     MigrationVersion,
     /// Stores a list of periods a user has minted wraps for.
     UserPeriods(Address),
-    /// Stores the paused state of the contract.
-    Paused,
     /// Stores the total number of successful wrap mints across all users.
     TotalWrapCount,
     /// Stores the total number of wrap records revoked on-chain.
@@ -104,4 +102,6 @@ pub enum DataKey {
     /// Stores the token symbol, if overridden by an admin.
     /// Falls back to a hardcoded default when unset — see `queries::symbol`.
     Symbol,
+    /// Emergency pause state flag.
+    Paused,
 }

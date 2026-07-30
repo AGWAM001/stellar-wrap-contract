@@ -15,4 +15,5 @@ pub enum ContractError {
     WrapNotFound = 9,
     NoAdminTransferProposal = 10,
     AdminTransferProposalExists = 11,
+    Paused = 12,
 }
