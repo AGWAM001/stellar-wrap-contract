@@ -214,7 +214,17 @@ Successful admin rotations emit one event:
 
 ### Revoke event
 
-Revoke functionality is not implemented in this contract. Wraps are non-transferable and permanent once minted.
+`revoke_wrap(user, period, reason_hash)` is admin-only and permanently deletes
+a wrap record. Successful revocations emit one event:
+
+- **Topic 0**: `revoke` (`Symbol`)
+- **Topic 1**: `user` (`Address`)
+- **Topic 2**: `period` (`u64`)
+- **Data**: `reason_hash` (`BytesN<32>`) — SHA-256 hash of an off-chain revocation reason
+
+See [`revoke_wrap` operational policy](docs/revoke-policy.md) for when
+revocation is appropriate, evidence-retention requirements, and remint
+behavior (issue #224).
 
 ## Important note for indexers
 
@@ -408,6 +418,7 @@ storage layout must ship as a numbered migration:
 ## Documentation
 
 - [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, and test vectors required by backend signing services (issue #213)
+- [`revoke_wrap` operational policy](docs/revoke-policy.md) — valid revocation reasons, off-chain evidence requirements, and remint behavior after revocation (issue #224)
 
 ## Development
 
