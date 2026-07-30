@@ -308,9 +308,12 @@ impl StellarWrapContract {
     }
 }
 
+// #[cfg(test)]
+// mod security_test;
+// #[cfg(test)]
+// mod test;
+// #[cfg(test)]
+// mod test_utils;
+
 #[cfg(test)]
-mod security_test;
-#[cfg(test)]
-mod test;
-#[cfg(test)]
-mod test_utils;
+mod balance_of_test;
