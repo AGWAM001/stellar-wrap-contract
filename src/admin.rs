@@ -1,5 +1,6 @@
 use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
+use crate::mint::TTL_TEMP;
 use crate::{ContractError, DataKey};
 
 /// Reads the stored admin or panics with `NotInitialized`.
@@ -28,7 +29,10 @@ pub(crate) fn update_admin(e: Env, new_admin: Address) {
 
 pub(crate) fn unpause(e: Env) {
     read_admin(&e).require_auth();
-    e.storage().instance().set(&DataKey::Paused, &false);
+    e.storage().temporary().set(&DataKey::Paused, &false);
+    e.storage()
+        .temporary()
+        .extend_ttl(&DataKey::Paused, TTL_TEMP, TTL_TEMP);
     e.events()
         .publish((symbol_short!("pause"), symbol_short!("status")), false);
 }
@@ -135,7 +139,10 @@ pub(crate) fn set_name(e: Env, name: soroban_sdk::String) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    e.storage().instance().set(&DataKey::Name, &name);
+    e.storage().temporary().set(&DataKey::Name, &name);
+    e.storage()
+        .temporary()
+        .extend_ttl(&DataKey::Name, TTL_TEMP, TTL_TEMP);
 }
 
 pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
@@ -146,7 +153,10 @@ pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    e.storage().instance().set(&DataKey::Symbol, &symbol);
+    e.storage().temporary().set(&DataKey::Symbol, &symbol);
+    e.storage()
+        .temporary()
+        .extend_ttl(&DataKey::Symbol, TTL_TEMP, TTL_TEMP);
 }
 
 

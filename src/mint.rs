@@ -4,6 +4,9 @@ use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
+/// TTL for temporary storage entries (~1 day in ledgers at 5s/ledger).
+/// Used for non-critical data migrated from Instance to Temporary storage.
+pub(crate) const TTL_TEMP: u32 = 17_280;
 pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 
 fn validate_period(e: &Env, period: u64) {
@@ -135,7 +138,7 @@ pub(crate) fn transition_wrap_state(
         .unwrap_or_else(|| panic_with_error!(e, ContractError::WrapNotFound));
 
     let now = e.ledger().timestamp();
-    if !record.fsm.transition_to(next_state.clone(), now) {
+    if !record.fsm.transition_to(next_state, now) {
         panic_with_error!(e, ContractError::InvalidStateTransition);
     }
 

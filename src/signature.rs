@@ -40,6 +40,7 @@ pub fn construct_mint_payload(
 /// The verification is performed over the canonical mint payload so the
 /// signature is bound to the current contract instance, the target user,
 /// the period, the archetype, and the data hash.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_mint_signature(
     e: &Env,
     admin_pubkey: &BytesN<32>,

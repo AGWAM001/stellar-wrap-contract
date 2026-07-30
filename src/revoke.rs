@@ -1,5 +1,6 @@
 use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
+use crate::mint::TTL_TEMP;
 use crate::{ContractError, DataKey};
 
 /// Revokes an existing wrap record for the given user and period.
@@ -67,9 +68,12 @@ pub(crate) fn revoke_wrap(
     }
 
     let total_revoked_key = DataKey::TotalRevoked;
-    let current_total: u64 = e.storage().instance().get(&total_revoked_key).unwrap_or(0);
+    let current_total: u64 = e.storage().temporary().get(&total_revoked_key).unwrap_or(0);
     let next_total = current_total + 1;
-    e.storage().instance().set(&total_revoked_key, &next_total);
+    e.storage().temporary().set(&total_revoked_key, &next_total);
+    e.storage()
+        .temporary()
+        .extend_ttl(&total_revoked_key, TTL_TEMP, TTL_TEMP);
 
     // Emit revoke event with reason_hash for audit trail
     e.events()
