@@ -1,9 +1,11 @@
 #![cfg(test)]
+#![allow(dead_code)]
 
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol};
 
 /// Signs the same payload layout the contract rebuilds in `mint::mint_wrap`.
+#[allow(dead_code)]
 pub(crate) fn sign_payload(
     env: &Env,
     signer: &SigningKey,

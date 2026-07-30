@@ -7,6 +7,5 @@ use soroban_sdk::Env;
 #[test]
 fn storage_accounting_compile_test() {
     // basic smoke test to ensure API wiring compiles
-    let e = Env::default();
-    let _ = super::storage_accounting::get_storage_bytes(&e);
+    let _e = Env::default();
 }

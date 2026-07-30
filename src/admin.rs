@@ -10,6 +10,7 @@ pub(crate) fn read_admin(e: &Env) -> Address {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
 
+#[allow(deprecated)]
 pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     if e.storage().instance().has(&DataKey::Admin) {
         panic_with_error!(e, ContractError::AlreadyInitialized);
@@ -21,6 +22,7 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     e.events().publish((symbol_short!("init"),), admin);
 }
 
+#[allow(deprecated)]
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
     let current_admin = read_admin(&e);
     current_admin.require_auth();
@@ -33,8 +35,7 @@ pub(crate) fn update_admin(e: Env, new_admin: Address) {
     );
 }
 
-
-
+#[allow(deprecated)]
 pub(crate) fn set_pause(e: Env, paused: bool) {
     read_admin(&e).require_auth();
     e.storage().instance().set(&DataKey::Paused, &paused);
@@ -77,6 +78,7 @@ pub(crate) fn migration_version(e: &Env) -> u32 {
         .unwrap_or(0)
 }
 
+#[allow(deprecated)]
 pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
     let current_admin: Address = e
         .storage()
@@ -106,7 +108,9 @@ pub(crate) fn propose_admin(e: Env, new_admin: Address) {
         panic_with_error!(e, ContractError::AdminTransferProposalExists);
     }
 
-    e.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+    e.storage()
+        .instance()
+        .set(&DataKey::PendingAdmin, &new_admin);
 }
 
 pub(crate) fn accept_admin(e: Env) {
@@ -169,5 +173,3 @@ pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
     current_admin.require_auth();
     e.storage().instance().set(&DataKey::Symbol, &symbol);
 }
-
-
