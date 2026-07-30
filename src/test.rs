@@ -1786,3 +1786,72 @@ fn test_balance_of_before_initialize() {
     // balance_of must still return 0 without panicking.
     assert_eq!(client.balance_of(&user), 0);
 }
+
+#[test]
+fn test_get_latest_wrap_multiple_wraps() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[99u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+    let hash3 = BytesN::from_array(&env, &[30u8; 32]);
+
+    let sig1 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202401,
+        &archetype,
+        &hash1,
+        CURRENT_PAYLOAD_VERSION,
+    );
+    let sig2 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202402,
+        &archetype,
+        &hash2,
+        CURRENT_PAYLOAD_VERSION,
+    );
+    let sig3 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202403,
+        &archetype,
+        &hash3,
+        CURRENT_PAYLOAD_VERSION,
+    );
+
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
+    let latest1 = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest1.period, 202401);
+    assert_eq!(latest1.data_hash, hash1);
+
+    client.mint_wrap(&user, &202402, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
+    let latest2 = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest2.period, 202402);
+    assert_eq!(latest2.data_hash, hash2);
+
+    client.mint_wrap(&user, &202403, &archetype, &hash3, &CURRENT_PAYLOAD_VERSION, &sig3);
+    let latest3 = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest3.period, 202403);
+    assert_eq!(latest3.data_hash, hash3);
+
+    assert_eq!(client.balance_of(&user), 3);
+}
+
