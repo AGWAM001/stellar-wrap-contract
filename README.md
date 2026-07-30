@@ -1,5 +1,7 @@
 # Stellar Wrap Contract
 
+[![Coverage](https://codecov.io/gh/zintarh/stellar-wrap-contract/branch/main/graph/badge.svg)](https://codecov.io/gh/zintarh/stellar-wrap-contract)
+
 Soroban contract for storing non-transferable Stellar Wrap records by wallet and reporting successful wrap mints through events.
 
 ## Contract layout
@@ -62,10 +64,22 @@ Returned by `health()`, reports:
 - `update_admin(e: Env, new_admin: Address)`
 - `mint_wrap(e: Env, user: Address, period: u64, archetype: Symbol, data_hash: BytesN<32>, signature: BytesN<64>)`
 - `migrate(e: Env, version: u32)`
+### Mint signature payload versioning
 
+The contract requires mint signatures over a versioned canonical payload. The current payload format is:
+
+- `0x01` — payload version byte
+- `XDR(contract_address)`
+- `XDR(user)`
+- `XDR(period)`
+- `XDR(archetype)`
+- `XDR(data_hash)`
+
+Backend signers must include this version byte in all new mint signatures. This version field allows the contract and backend to evolve safely without ambiguous verification behavior.
 ### Read methods
 
-- `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`
+- `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`  
+  Returns the wrap record for the specified user and period. Safe to call before initialization — returns `None` if the contract has not been initialized or if no wrap exists for the given user and period.
 - `balance_of(e: Env, user: Address) -> i128`
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
 - `verify_with_oracle(e: Env, oracle: Address, data_hash: BytesN<32>) -> bool`
@@ -99,6 +113,89 @@ records and does not replace the local `verify_data` comparison.
 ## Event schemas
 
 ### Mint event
+### CLI examples
+
+Placeholder variables:
+
+- `<CONTRACT_ID>` — deployed contract address (e.g. `C...`)
+- `<USER_ADDRESS>` — Stellar account address (e.g. `G...`)
+- `<PERIOD>` — period encoded as `YYYYMM` (e.g. `202401`)
+- `<DATA_HEX>` — hex-encoded raw data bytes
+
+#### `get_wrap`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  get_wrap \
+  --user <USER_ADDRESS> \
+  --period <PERIOD>
+```
+
+Returns `Option<WrapRecord>` — either the record (see [WrapRecord](#wraprecord)) or `null`.
+
+#### `get_latest_wrap`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  get_latest_wrap \
+  --user <USER_ADDRESS>
+```
+
+Returns `Option<WrapRecord>` — same shape as `get_wrap`, or `null`.
+
+#### `balance_of`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  balance_of \
+  --user <USER_ADDRESS>
+```
+
+Returns an integer count of wraps for the user (e.g. `42`).
+
+#### `verify_data`
+
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  -- \
+  verify_data \
+  --user <USER_ADDRESS> \
+  --period <PERIOD> \
+  --data <DATA_HEX>
+```
+
+Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
+
+## Security model
+
+Mint signatures are verified over a canonical payload that binds the request to:
+
+- a domain separator (`stellar-wrap-v1`)
+- the deploying contract instance address
+- the target user address
+- the period (`YYYYMM`)
+- the archetype symbol
+- the data hash
+
+The payload is constructed by concatenating the XDR-encoded fields in the order above. Off-chain signers should use the same byte layout when creating signatures:
+
+1. encode the domain separator as raw bytes
+2. append the XDR encoding of the contract address
+3. append the XDR encoding of the user address
+4. append the XDR encoding of the period as `u64`
+5. append the XDR encoding of the archetype symbol
+6. append the XDR encoding of the 32-byte data hash
+
+This ensures that a signature for one contract instance cannot be replayed against another deployment with the same admin key.
+
+## Event schema
 
 Successful wrap mints emit one event:
 
@@ -120,9 +217,20 @@ Successful wrap mints emit one event:
 
 ### Admin update event
 
-The `update_admin` function does **not** emit an event. To track admin changes, indexers should:
-- Query the `get_admin(e)` function periodically
-- Store the current admin address and detect changes across queries
+Successful admin rotations emit one event:
+
+- **Topic 0**: `admin` (`Symbol`)
+- **Topic 1**: `updated` (`Symbol`)
+- **Data**: `(old_admin, new_admin)` (`Address`, `Address`) — previous admin and newly assigned admin
+
+**Example values:**
+- Topic 0: `admin`
+- Topic 1: `updated`
+- Data: `(GOLDADMIN..., GNEWADMIN...)`
+
+**Properties relevant to indexers:**
+- The event is emitted only after the current admin authorizes the call and storage is updated
+- Indexers can track admin rotations without polling `get_admin(e)`, but should still verify the live admin via that query when enforcing privileged flows
 
 ### Revoke event
 
@@ -137,6 +245,18 @@ Revoke functionality is not implemented in this contract. Wraps are non-transfer
 ## Leaderboard decision
 
 Issue `#68` is implemented as an off-chain leaderboard strategy.
+
+## Tech Stack
+
+- **Language:** Rust
+- **Smart Contract Framework:** Soroban SDK v21.7.1
+- **Build Tool:** Cargo
+- **Target:** WebAssembly (WASM) for Soroban runtime
+- **Testing:** Soroban SDK testutils
+
+> **Note:** Dependency versions are pinned exactly (`=21.7.1`) in `Cargo.toml`. For reproducible builds, always build against the committed `Cargo.lock` (run `cargo build --locked` / `cargo test --locked`) rather than letting Cargo re-resolve versions.
+
+---
 
 Reasoning:
 
@@ -305,6 +425,9 @@ storage layout must ship as a numbered migration:
 - Additive changes (new `DataKey` variants, new methods) need no migration; changing or removing
   the shape of an existing key does, and the new code must bump the migration version.
 - Call `migrate` in the same transaction batch as the upgrade, and verify with `migration_version()`.
+## Documentation
+
+- [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, and test vectors required by backend signing services (issue #213)
 
 ## Development
 
@@ -313,9 +436,74 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.94.1 with the
 `rustup` installed, the correct toolchain is selected automatically.
 
 Run the test suite with:
+## Local Development Quickstart
+
+### Prerequisites
+
+- **Rust** – install via [rustup](https://rustup.rs/). The project targets a recent stable toolchain.
+- **wasm32 target** – add the WebAssembly compilation target:
+  ```bash
+  rustup target add wasm32-unknown-unknown
+  ```
+- **Stellar CLI** (recommended) – install from the [Stellar soroban-cli releases](https://github.com/stellar/stellar-cli/releases) or via `cargo`:
+  ```bash
+  cargo install stellar-cli
+  ```
+  Alternatively, install the legacy **Soroban CLI**:
+  ```bash
+  cargo install soroban-cli
+  ```
+
+### Common commands
+
+| Action | Command |
+|---|---|
+| Format | `cargo fmt` |
+| Format check (CI) | `cargo fmt --check` or `make fmt-check` |
+| Lint | `cargo clippy -- -D warnings` or `make lint` |
+| Test | `cargo test` or `make test` |
+| Fuzz `mint_wrap` | `make fuzz FUZZ_SECONDS=30` |
+| Release build (WASM) | `cargo build --release --target wasm32-unknown-unknown` or `make build` |
+| Deploy to testnet | `make deploy-testnet` |
+| Docker reproducible build | `make docker-build` or `docker build -t stellar-wrap-contract .` |
+
+See the `Makefile` for the full list of targets (`make help`).
+
+### Fuzzing `mint_wrap`
+
+This repo ships a [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz) target that
+stresses `mint_wrap` with adversarial periods, hashes, and signatures
+(`fuzz/fuzz_targets/fuzz_mint_wrap.rs`).
+
+Prerequisites:
 
 ```bash
-cargo test
+rustup install nightly
+rustup component add rust-src --toolchain nightly
+cargo install --locked cargo-fuzz
+```
+
+Build / run (ThreadSanitizer + `build-std` is required on macOS):
+
+```bash
+make fuzz-build
+make fuzz FUZZ_SECONDS=30
+# equivalent:
+cargo +nightly fuzz run --sanitizer=thread --build-std fuzz_mint_wrap -- -max_total_time=30
+```
+
+Invariants checked by the harness:
+
+- Invalid periods never persist a wrap or change balances
+- Rogue signatures never mint
+- A valid admin signature + valid period mints exactly once
+- Reminting the same `(user, period)` always fails without changing balance
+
+### Troubleshooting
+
+**"target `wasm32-unknown-unknown` not installed"**
+```bash
+rustup target add wasm32-unknown-unknown
 ```
 
 Build the WASM artifact with:
@@ -323,3 +511,44 @@ Build the WASM artifact with:
 ```bash
 cargo build --release --target wasm32-unknown-unknown
 ```
+**SDK / toolchain mismatch errors** (e.g. `package \`soroban-sdk\` cannot be built because it requires a different Rust version`)
+
+The Soroban SDK often tracks Rust nightly or a specific stable release. If you see version conflicts:
+- Verify your Rust version matches what the lockfile expects:
+  ```bash
+  rustup show
+  rustup update stable
+  ```
+- If the SDK pins a nightly, install and use it:
+  ```bash
+  rustup install nightly-YYYY-MM-DD
+  rustup target add wasm32-unknown-unknown --toolchain nightly-YYYY-MM-DD
+  cargo +nightly-YYYY-MM-DD build --release --target wasm32-unknown-unknown
+  ```
+- Clean stale artifacts before switching toolchains:
+  ```bash
+  cargo clean
+  ```
+
+**WASM build fails with link errors**
+Ensure `wasm32-unknown-unknown` is the active target and no host-specific native dependencies leak in. The `Dockerfile` provides a fully isolated environment for reproducible WASM builds.
+## Mainnet deployment
+
+Before deploying to mainnet, review the release checklist in [MAINNET_RELEASE_CHECKLIST.md](MAINNET_RELEASE_CHECKLIST.md). It covers tests, optimized builds, release artifact hash verification, signer backup, initialization, and rollback guidance.
+### Gas Analysis
+
+The contract includes gas analysis tests that measure CPU instructions and memory usage
+of mint operations. These tests always run assertions on resource bounds, but detailed
+budget tables are suppressed during normal test runs to keep CI output clean.
+
+To run tests with full gas budget reporting:
+
+```bash
+make test-gas-report
+# or
+SOROBAN_GAS_REPORT=1 cargo test -- --nocapture
+```
+
+> **Note:** The Soroban test framework automatically creates snapshot files under
+> `test_snapshots/` during test execution. These are already in `.gitignore` and
+> can be cleaned up with `make clean-snapshots`.
