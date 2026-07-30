@@ -2220,14 +2220,20 @@ fn test_update_admin_pubkey_emits_event() {
     client.mint_wrap(&user, &202401, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
     client.mint_wrap(&user, &202402, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
 
+    assert_eq!(client.get_wrap(&user, &202401).unwrap().data_hash, hash1);
+    assert_eq!(client.get_wrap(&user, &202402).unwrap().data_hash, hash2);
     let latest = client.get_latest_wrap(&user).unwrap();
     assert_eq!(latest.period, 202402);
 
     let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
     client.revoke_wrap(&user, &202402, &reason_hash);
 
-    // LatestPeriod was cleared; get_latest_wrap returns None
-    assert!(client.get_latest_wrap(&user).is_none());
+    assert_eq!(client.get_wrap(&user, &202401).unwrap().data_hash, hash1);
+    assert!(client.get_wrap(&user, &202402).is_none());
+    // LatestPeriod was cleared; get_latest_wrap falls back to the older wrap.
+    let latest = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest.period, 202401);
+    assert_eq!(latest.data_hash, hash1);
     assert_eq!(client.balance_of(&user), 1);
 }
 
