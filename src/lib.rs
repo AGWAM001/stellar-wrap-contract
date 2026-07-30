@@ -18,7 +18,7 @@
 extern crate std;
 
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol,
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
 
 mod admin;
@@ -29,14 +29,14 @@ mod mint;
 mod oracle;
 mod queries;
 mod revoke;
-mod events;
 pub mod signature;
 mod storage_accounting;
 mod storage_types;
+mod transfer;
 
 pub use mint::CURRENT_PAYLOAD_VERSION;
 pub use oracle::DataHashOracle;
-pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use storage_types::{ContractHealth, DataKey, TransferFeeConfig, WrapLifecycleFSM, WrapRecord, WrapState};
 pub use token::TokenInterface;
 
 #[contract]
@@ -50,6 +50,15 @@ impl StellarWrapContract {
 
     pub fn update_admin(e: Env, new_admin: Address) {
         admin::update_admin(e, new_admin);
+    }
+
+    /// Configures the token-denominated fee charged by `transfer_wrap`.
+    ///
+    /// Only the current admin may update the configuration. An amount of zero
+    /// enables fee-free transfers without removing the configured token and
+    /// recipient.
+    pub fn set_transfer_fee(e: Env, token: Address, recipient: Address, amount: i128) {
+        admin::set_transfer_fee(e, token, recipient, amount);
     }
 
     pub fn pause(e: Env) {
@@ -120,6 +129,21 @@ impl StellarWrapContract {
             payload_version,
             signature,
         );
+    }
+
+    /// Transfers one wrap record and atomically charges the configured fee.
+    ///
+    /// The current owner (`from`) must authorize the invocation. The record is
+    /// moved only if fee payment succeeds; any token-contract failure rolls the
+    /// entire invocation back.
+    pub fn transfer_wrap(e: Env, from: Address, to: Address, period: u64) {
+        transfer::transfer_wrap(e, from, to, period);
+    }
+
+    /// Backfills the ownership-period index for records minted before transfer
+    /// support was deployed. Admin-only and callable once per user.
+    pub fn backfill_wrap_periods(e: Env, user: Address, periods: Vec<u64>) {
+        transfer::backfill_wrap_periods(e, user, periods);
     }
 
     pub fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
@@ -268,6 +292,10 @@ impl StellarWrapContract {
         queries::get_admin(e)
     }
 
+    pub fn get_transfer_fee(e: Env) -> Option<TransferFeeConfig> {
+        queries::get_transfer_fee(e)
+    }
+
     pub fn health(e: Env) -> ContractHealth {
         queries::health(e)
     }
@@ -349,3 +377,5 @@ mod security_test;
 mod test;
 #[cfg(test)]
 mod test_utils;
+#[cfg(test)]
+mod transfer_test;
