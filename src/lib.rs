@@ -22,6 +22,7 @@ use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, Byte
 mod admin;
 mod alias;
 mod errors;
+mod governance;
 mod mint;
 mod queries;
 mod revoke;
@@ -30,7 +31,11 @@ mod storage_types;
 mod storage_accounting;
 
 pub use errors::ContractError;
-pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use storage_types::{
+    AdminProposal, ContractHealth, DataKey, ProposalStatus, WrapLifecycleFSM, WrapRecord,
+    WrapState,
+};
+
 
 #[contract]
 pub struct StellarWrapContract;
@@ -306,7 +311,52 @@ impl StellarWrapContract {
     pub fn fee_params(e: Env) -> storage_types::FeeParams {
         storage_accounting::get_fee_params(&e)
     }
+
+    /// DAO Governance: Create a proposal to update the contract admin.
+    pub fn create_admin_proposal(
+        e: Env,
+        proposer: Address,
+        proposed_admin: Address,
+        duration_seconds: u64,
+    ) -> u64 {
+        governance::create_admin_proposal(e, proposer, proposed_admin, duration_seconds)
+    }
+
+    /// DAO Governance: Cast a vote on an active admin proposal.
+    pub fn vote_admin_proposal(e: Env, voter: Address, proposal_id: u64, support: bool) {
+        governance::vote_admin_proposal(e, voter, proposal_id, support);
+    }
+
+    /// DAO Governance: Execute a proposal after voting period has ended.
+    pub fn execute_admin_proposal(e: Env, proposal_id: u64) {
+        governance::execute_admin_proposal(e, proposal_id);
+    }
+
+    /// DAO Governance: Cancel an active proposal. Proposer or current admin can cancel.
+    pub fn cancel_admin_proposal(e: Env, caller: Address, proposal_id: u64) {
+        governance::cancel_admin_proposal(e, caller, proposal_id);
+    }
+
+    /// DAO Governance: Query proposal details by ID.
+    pub fn get_admin_proposal(e: Env, proposal_id: u64) -> Option<AdminProposal> {
+        governance::get_admin_proposal(&e, proposal_id)
+    }
+
+    /// DAO Governance: Query vote cast by a specific voter on a proposal.
+    pub fn get_admin_proposal_vote(
+        e: Env,
+        proposal_id: u64,
+        voter: Address,
+    ) -> Option<bool> {
+        governance::get_admin_proposal_vote(&e, proposal_id, voter)
+    }
+
+    /// DAO Governance: Query total proposal count.
+    pub fn get_admin_proposal_count(e: Env) -> u64 {
+        governance::get_admin_proposal_count(&e)
+    }
 }
+
 
 #[cfg(test)]
 mod security_test;

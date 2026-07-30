@@ -501,3 +501,15 @@ SOROBAN_GAS_REPORT=1 cargo test -- --nocapture
 > **Note:** The Soroban test framework automatically creates snapshot files under
 > `test_snapshots/` during test execution. These are already in `.gitignore` and
 > can be cleaned up with `make clean-snapshots`.
+
+## DAO Governance Module
+
+The contract includes a DAO governance module for updating the contract's admin address via community/on-chain proposals.
+
+### Workflow
+
+1. **Create Proposal:** Call `create_admin_proposal(proposer, proposed_admin, duration_seconds)`. Generates a proposal in `Active` status.
+2. **Cast Votes:** Accounts vote via `vote_admin_proposal(voter, proposal_id, support)`. Double voting is prevented.
+3. **Execute Proposal:** After `duration_seconds` elapses, call `execute_admin_proposal(proposal_id)`. If `votes_for > votes_against`, the contract admin updates to `proposed_admin`.
+4. **Cancel Proposal:** Proposer or current admin can cancel active proposals via `cancel_admin_proposal(caller, proposal_id)`.
+

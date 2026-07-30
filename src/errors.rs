@@ -18,4 +18,12 @@ pub enum ContractError {
     Paused = 12,
     ArithmeticOverflow = 13,
     InvalidFeeParams = 14,
+    ProposalNotFound = 15,
+    ProposalNotActive = 16,
+    ProposalAlreadyVoted = 17,
+    ProposalVotingPeriodNotEnded = 18,
+    ProposalVotingPeriodEnded = 19,
+    ProposalDefeated = 20,
+    InvalidProposalDuration = 21,
 }
+
