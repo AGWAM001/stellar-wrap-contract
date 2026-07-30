@@ -27,7 +27,7 @@ mod queries;
 mod revoke;
 mod signature;
 mod storage_types;
-mod token;
+mod storage_accounting;
 
 pub use errors::ContractError;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
@@ -292,6 +292,26 @@ impl token::TokenInterface for StellarWrapContract {
 
     fn balance_of(e: Env, user: Address) -> i128 {
         queries::balance_of(e, user)
+    }
+
+    /// Returns estimated current persistent storage bytes used by the contract.
+    pub fn storage_bytes(e: Env) -> u64 {
+        storage_accounting::get_storage_bytes(&e)
+    }
+
+    /// Returns the computed current fee according to the on-chain params.
+    pub fn current_fee(e: Env) -> i128 {
+        storage_accounting::compute_current_fee(&e)
+    }
+
+    /// Admin: set fee params.
+    pub fn set_fee_params(e: Env, params: storage_types::FeeParams) {
+        storage_accounting::set_fee_params(&e, params);
+    }
+
+    /// View: fee params
+    pub fn fee_params(e: Env) -> storage_types::FeeParams {
+        storage_accounting::get_fee_params(&e)
     }
 }
 
