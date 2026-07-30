@@ -29,4 +29,13 @@ pub enum ContractError {
     StakeCooldownNotElapsed = 22,
     InvalidStakeConfig = 23,
     StakeArithmeticOverflow = 24,
+    // Governance proposal errors
+    ProposalNotFound = 25,
+    ProposalNotActive = 26,
+    ProposalAlreadyVoted = 27,
+    ProposalVotingPeriodNotEnded = 28,
+    ProposalVotingPeriodEnded = 29,
+    ProposalDefeated = 30,
+    InvalidProposalDuration = 31,
 }
+

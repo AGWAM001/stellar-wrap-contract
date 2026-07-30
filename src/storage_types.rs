@@ -156,6 +156,36 @@ pub enum DataKey {
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
+    // DAO Governance Admin Proposal keys:
+    /// Total number of governance proposals created (u64)
+    AdminProposalCount,
+    /// Individual governance admin proposal record keyed by proposal ID
+    AdminProposal(u64),
+    /// Vote record for a voter on a proposal: (proposal_id, voter)
+    AdminProposalVote(u64, Address),
     /// Tracks the contract version number, incremented on each `upgrade`.
     ContractVersion,
 }
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ProposalStatus {
+    Active = 1,
+    Executed = 2,
+    Defeated = 3,
+    Cancelled = 4,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub proposed_admin: Address,
+    pub votes_for: u64,
+    pub votes_against: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub status: ProposalStatus,
+}
+
