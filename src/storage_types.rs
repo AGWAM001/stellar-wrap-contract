@@ -71,6 +71,20 @@ pub struct ContractHealth {
     pub has_signing_key: bool,
 }
 
+/// New struct: FeeParams for algorithmic fee model
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeParams {
+    /// base fee in token units
+    pub base_fee: i128,
+    /// fee increment per scaling step (applied per `scale_step_kib`)
+    pub per_kib_fee: i128,
+    /// scaling step in KiB (e.g., 1024 means per KiB)
+    pub scale_step_kib: u64,
+    /// maximum fee cap
+    pub max_fee: i128,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -78,6 +92,8 @@ pub enum DataKey {
     Admin,
     /// Stores the Ed25519 public key used to validate backend signatures.
     AdminPubKey,
+    /// Stores a proposed new admin address during two-step transfer.
+    PendingAdmin,
     /// Stores individual wrap records keyed by user and period.
     Wrap(Address, u64),
     /// Stores the total number of wraps for a specific user.
@@ -88,8 +104,24 @@ pub enum DataKey {
     MigrationVersion,
     /// Stores a list of periods a user has minted wraps for.
     UserPeriods(Address),
-    /// Stores the paused state of the contract.
-    Paused,
     /// Stores the total number of successful wrap mints across all users.
     TotalWrapCount,
+    /// Stores the total number of wrap records revoked on-chain.
+    TotalRevoked,
+    /// Stores a user-controlled 32-byte alias hash for privacy-preserving profile display.
+    AliasHash(Address),
+    /// Stores the token display name, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::name`.
+    Name,
+    /// Stores the token symbol, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::symbol`.
+    Symbol,
+    /// Emergency pause state flag.
+    Paused,
+
+    // New instance storage keys for accounting / fee system:
+    /// Estimated persistent storage bytes used by this contract (instance-level)
+    StorageBytes,
+    /// Params for the algorithmic fee function (instance-level)
+    FeeParams,
 }

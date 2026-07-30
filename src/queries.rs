@@ -79,12 +79,25 @@ pub(crate) fn get_admin(e: Env) -> Option<Address> {
     e.storage().instance().get(&DataKey::Admin)
 }
 
+pub(crate) fn total_revoked(e: Env) -> u64 {
+    e.storage()
+        .instance()
+        .get::<_, u64>(&DataKey::TotalRevoked)
+        .unwrap_or(0)
+}
+
 pub(crate) fn name(e: Env) -> String {
-    String::from_str(&e, "Stellar Wrap Registry")
+    e.storage()
+        .instance()
+        .get(&DataKey::Name)
+        .unwrap_or_else(|| String::from_str(&e, "Stellar Wrap Registry"))
 }
 
 pub(crate) fn symbol(e: Env) -> String {
-    String::from_str(&e, "WRAP")
+    e.storage()
+        .instance()
+        .get(&DataKey::Symbol)
+        .unwrap_or_else(|| String::from_str(&e, "WRAP"))
 }
 
 pub(crate) fn decimals(_e: Env) -> u32 {
