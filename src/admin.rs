@@ -1,6 +1,6 @@
-use soroban_sdk::{panic_with_error, Address, BytesN, Env};
+use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
-use crate::{ContractError, DataKey};
+use crate::{ContractError, DataKey, TransferFeeConfig};
 
 /// Reads the stored admin or panics with `NotInitialized`.
 pub(crate) fn read_admin(e: &Env) -> Address {
@@ -23,6 +23,22 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
     read_admin(&e).require_auth();
     e.storage().instance().set(&DataKey::Admin, &new_admin);
+}
+
+pub(crate) fn set_transfer_fee(e: Env, token: Address, recipient: Address, amount: i128) {
+    read_admin(&e).require_auth();
+    if amount < 0 {
+        panic_with_error!(e, ContractError::InvalidFee);
+    }
+
+    let config = TransferFeeConfig {
+        amount,
+        recipient: recipient.clone(),
+        token: token.clone(),
+    };
+    e.storage().instance().set(&DataKey::TransferFee, &config);
+    e.events()
+        .publish((symbol_short!("fee_set"), token, recipient), amount);
 }
 
 /// Marks a storage migration as applied. A version can only be applied once and

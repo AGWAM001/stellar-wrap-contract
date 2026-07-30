@@ -63,49 +63,6 @@
                         "val": {
                           "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
                         }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "AllowedArchetypes"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "vec": [
-                            {
-                              "symbol": "builder"
-                            },
-                            {
-                              "symbol": "arch"
-                            },
-                            {
-                              "symbol": "architect"
-                            },
-                            {
-                              "symbol": "soroban"
-                            },
-                            {
-                              "symbol": "defi"
-                            },
-                            {
-                              "symbol": "patron"
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "SchemaVersion"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "u32": 3
-                        }
                       }
                     ]
                   }

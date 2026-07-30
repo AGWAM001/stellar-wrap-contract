@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol,
+    panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 
 use crate::{ContractError, DataKey, WrapRecord};
@@ -10,7 +10,7 @@ fn validate_period(e: &Env, period: u64) {
     let year = period / 100;
     let month = period % 100;
 
-    if year < 2024 || year > 2100 || month < 1 || month > 12 {
+    if !(2024..=2100).contains(&year) || !(1..=12).contains(&month) {
         panic_with_error!(e, ContractError::InvalidPeriod);
     }
 }
@@ -68,6 +68,18 @@ pub(crate) fn mint_wrap(
         panic_with_error!(e, ContractError::WrapAlreadyExists);
     }
 
+    let count_key = DataKey::WrapCount(user.clone());
+    let current_count: u32 = e.storage().persistent().get(&count_key).unwrap_or(0);
+    let periods_key = DataKey::WrapPeriods(user.clone());
+    let mut periods: Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&periods_key)
+        .unwrap_or_else(|| Vec::new(&e));
+    if periods.len() != current_count {
+        panic_with_error!(e, ContractError::StorageInvariantViolation);
+    }
+
     let record = WrapRecord {
         timestamp: e.ledger().timestamp(),
         data_hash,
@@ -80,9 +92,9 @@ pub(crate) fn mint_wrap(
         .persistent()
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
-    let count_key = DataKey::WrapCount(user.clone());
-    let current_count: u32 = e.storage().persistent().get(&count_key).unwrap_or(0);
-    let next_count = current_count + 1;
+    let next_count = current_count
+        .checked_add(1)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::StorageInvariantViolation));
     e.storage().persistent().set(&count_key, &next_count);
     e.storage()
         .persistent()
@@ -96,6 +108,12 @@ pub(crate) fn mint_wrap(
             .persistent()
             .extend_ttl(&latest_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
     }
+
+    periods.push_back(period);
+    e.storage().persistent().set(&periods_key, &periods);
+    e.storage()
+        .persistent()
+        .extend_ttl(&periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     e.events()
         .publish((symbol_short!("mint"), user, period), archetype);

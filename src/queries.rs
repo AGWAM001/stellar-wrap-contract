@@ -1,4 +1,4 @@
-use crate::{ContractHealth, DataKey, WrapRecord};
+use crate::{ContractHealth, DataKey, TransferFeeConfig, WrapRecord};
 use soroban_sdk::{Address, Bytes, BytesN, Env, String};
 
 pub(crate) fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
@@ -49,6 +49,10 @@ pub(crate) fn health(e: Env) -> ContractHealth {
 
 pub(crate) fn get_admin(e: Env) -> Option<Address> {
     e.storage().instance().get(&DataKey::Admin)
+}
+
+pub(crate) fn get_transfer_fee(e: Env) -> Option<TransferFeeConfig> {
+    e.storage().instance().get(&DataKey::TransferFee)
 }
 
 pub(crate) fn name(e: Env) -> String {

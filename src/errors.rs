@@ -11,4 +11,10 @@ pub enum ContractError {
     InvalidSignature = 5,
     InvalidPeriod = 6,
     MigrationAlreadyApplied = 7,
+    WrapNotFound = 8,
+    InvalidTransfer = 9,
+    TransferFeeNotConfigured = 10,
+    InvalidFee = 11,
+    TransferInProgress = 12,
+    StorageInvariantViolation = 13,
 }

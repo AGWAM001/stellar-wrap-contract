@@ -23,6 +23,17 @@ pub struct ContractHealth {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferFeeConfig {
+    /// Amount of `token` charged to the sender for each successful transfer.
+    pub amount: i128,
+    /// Address that receives transfer fees.
+    pub recipient: Address,
+    /// Soroban token contract used to collect fees.
+    pub token: Address,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     /// Stores the address of the admin.
@@ -35,6 +46,13 @@ pub enum DataKey {
     WrapCount(Address),
     /// Stores the latest period minted for a specific user.
     LatestPeriod(Address),
+    /// Stores the periods currently owned by a user so transfers can update
+    /// `LatestPeriod` without scanning contract storage.
+    WrapPeriods(Address),
+    /// Stores the admin-controlled transfer fee configuration.
+    TransferFee,
+    /// Temporary reentrancy guard for transfer calls.
+    TransferGuard,
     /// Stores the highest storage migration version already applied.
     MigrationVersion,
 }

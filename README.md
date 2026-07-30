@@ -1,6 +1,7 @@
 # Stellar Wrap Contract
 
-Soroban contract for storing non-transferable Stellar Wrap records by wallet and reporting successful wrap mints through events.
+Soroban contract for storing Stellar Wrap records by wallet, reporting successful
+mints, and supporting owner-authorized transfers with an admin-configured token fee.
 
 ## Contract layout
 
@@ -9,6 +10,7 @@ The contract is split into focused modules:
 - `src/lib.rs`: contract type and module wiring
 - `src/admin.rs`: initialization and admin updates
 - `src/mint.rs`: period validation, signature verification, wrap minting, event emission
+- `src/transfer.rs`: owner-authorized transfers, fee collection, and ownership indexes
 - `src/queries.rs`: read-only queries and metadata
 - `src/errors.rs`: contract error codes
 - `src/storage_types.rs`: storage keys and persisted record types
@@ -30,13 +32,24 @@ Each wrap record stores:
 - year must be between `2024` and `2100`
 - month must be between `01` and `12`
 
-## SBT compatibility
+## Transfer model
 
-Wrap records are implemented as non-transferable (soulbound) entries. The contract intentionally omits `transfer`, `transfer_from`, `approve`, and `allowance` methods. As a result:
+Wrap records are registry entries rather than fungible tokens. The contract omits
+`transfer_from`, `approve`, and `allowance`; an owner can move only a specific
+`(owner, period)` record by calling `transfer_wrap` and authorizing the call.
 
-- `balance_of(user)` returns the number of wrap records minted for `user`, not a tradable token balance.
-- records cannot be transferred between addresses by users.
-- any future removal or replacement of a wrap record would require an admin-controlled operation, not a user-initiated transfer.
+Transfers use an admin-controlled `TransferFeeConfig`:
+
+- `token` is the Soroban token contract used for payment
+- `recipient` receives the fee
+- `amount` is charged to the current owner; zero explicitly enables fee-free transfers
+
+The token payment and ownership update are one atomic Soroban invocation. If the
+fee payment fails, the wrap remains with its current owner. The record's original
+timestamp, data hash, archetype, and period are preserved.
+The owner's authorization covers both the `transfer_wrap` invocation and its
+nested token transfer; the contract never holds a token allowance.
+
 ### `ContractHealth`
 
 Returned by `health()`, reports:
@@ -44,7 +57,6 @@ Returned by `health()`, reports:
 - `initialized: bool` — whether `initialize()` has been called
 - `has_admin: bool` — whether an admin address is currently configured
 - `has_signing_key: bool` — whether an admin signing key is currently configured
->>>>>>> main
 
 ## Storage keys
 
@@ -53,6 +65,9 @@ Returned by `health()`, reports:
 - `DataKey::Wrap(Address, u64)`
 - `DataKey::WrapCount(Address)`
 - `DataKey::LatestPeriod(Address)`
+- `DataKey::WrapPeriods(Address)`
+- `DataKey::TransferFee`
+- `DataKey::TransferGuard` (temporary storage)
 - `DataKey::MigrationVersion`
 
 ## Public interface
@@ -61,7 +76,10 @@ Returned by `health()`, reports:
 
 - `initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>)`
 - `update_admin(e: Env, new_admin: Address)`
+- `set_transfer_fee(e: Env, token: Address, recipient: Address, amount: i128)`
 - `mint_wrap(e: Env, user: Address, period: u64, archetype: Symbol, data_hash: BytesN<32>, signature: BytesN<64>)`
+- `transfer_wrap(e: Env, from: Address, to: Address, period: u64)`
+- `backfill_wrap_periods(e: Env, user: Address, periods: Vec<u64>)`
 - `migrate(e: Env, version: u32)`
 
 ### Read methods
@@ -71,6 +89,7 @@ Returned by `health()`, reports:
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
 - `get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord>`
 - `get_admin(e: Env) -> Option<Address>`
+- `get_transfer_fee(e: Env) -> Option<TransferFeeConfig>`
 - `health(e: Env) -> ContractHealth`
 - `name(e: Env) -> String`
 - `symbol(e: Env) -> String`
@@ -105,9 +124,23 @@ The `update_admin` function does **not** emit an event. To track admin changes, 
 - Query the `get_admin(e)` function periodically
 - Store the current admin address and detect changes across queries
 
-### Revoke event
+### Transfer event
 
-Revoke functionality is not implemented in this contract. Wraps are non-transferable and permanent once minted.
+Successful transfers emit:
+
+- **Topic 0**: `transfer`
+- **Topic 1**: `from`
+- **Topic 2**: `to`
+- **Topic 3**: `period`
+- **Data**: `(fee_token, fee_recipient, fee_amount)`
+
+The event is emitted only after fee collection and all ownership indexes have
+been updated.
+
+### Transfer-fee configuration event
+
+`set_transfer_fee` emits topics `(fee_set, token, recipient)` with `amount` as
+event data.
 
 ## Important note for indexers
 
@@ -286,6 +319,14 @@ storage layout must ship as a numbered migration:
 - Additive changes (new `DataKey` variants, new methods) need no migration; changing or removing
   the shape of an existing key does, and the new code must bump the migration version.
 - Call `migrate` in the same transaction batch as the upgrade, and verify with `migration_version()`.
+
+Transfer support adds `WrapPeriods(Address)`, a bounded ownership index used to
+recompute `get_latest_wrap` after a transfer. Fresh mints populate it
+automatically. When upgrading a deployment that already has wrap records, the
+admin must call `backfill_wrap_periods(user, periods)` once per existing owner
+before those owners can mint or transfer. The method validates the count,
+uniqueness, and existence of every supplied period before writing the index,
+preventing a partial ownership index from being accepted.
 
 ## Development
 
