@@ -1,10 +1,14 @@
-use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env, Symbol};
+use soroban_sdk::{panic_with_error, Address, BytesN, Env, Symbol};
 
+use crate::events::{MintEventData, MintEventType};
 use crate::storage_accounting;
 use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
+/// TTL for temporary storage entries (~1 day in ledgers at 5s/ledger).
+/// Used for non-critical data migrated from Instance to Temporary storage.
+pub(crate) const TTL_TEMP: u32 = 17_280;
 pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 
 fn validate_period(e: &Env, period: u64) {
@@ -68,6 +72,8 @@ pub(crate) fn mint_wrap(
         archetype: archetype.clone(),
         period,
         fsm: WrapLifecycleFSM::new(WrapState::Active, now),
+        description: None,
+        image_url: None,
     };
 
     e.storage().persistent().set(&wrap_key, &record);
@@ -142,8 +148,155 @@ pub(crate) fn mint_wrap(
         );
     }
 
-    e.events()
-        .publish((symbol_short!("mint"), user, period), archetype);
+    e.events().publish(
+        (MintEventType::Mint.to_symbol(&e), user.clone(), period),
+        MintEventData::Mint(user, period, archetype),
+    );
+}
+
+pub const MAX_BATCH_SIZE: u32 = 100;
+
+pub(crate) fn mint_wrap_batch(
+    e: Env,
+    items: soroban_sdk::Vec<crate::storage_types::BatchWrapItem>,
+    aggregated_signature: Option<BytesN<64>>,
+) {
+    crate::admin::require_not_paused(&e);
+    if items.is_empty() {
+        panic_with_error!(&e, ContractError::BatchEmpty);
+    }
+    if items.len() > MAX_BATCH_SIZE {
+        panic_with_error!(&e, ContractError::BatchTooLarge);
+    }
+
+    let admin_pubkey = get_admin_pubkey(&e);
+    let contract_id = e.current_contract_address();
+
+    if let Some(agg_sig) = aggregated_signature {
+        // Validate payload version of items
+        for item in items.iter() {
+            validate_period(&e, item.period);
+            validate_payload_version(&e, item.payload_version);
+            item.user.require_auth();
+        }
+        let payload_version = items.get(0).unwrap().payload_version;
+        let _ = crate::signature::verify_batch_aggregated_signature(
+            &e,
+            &admin_pubkey,
+            &contract_id,
+            &items,
+            payload_version,
+            &agg_sig,
+        );
+    } else {
+        // Individual signatures inside batch items
+        for item in items.iter() {
+            validate_period(&e, item.period);
+            validate_payload_version(&e, item.payload_version);
+            item.user.require_auth();
+
+            let _ = verify_mint_signature(
+                &e,
+                &admin_pubkey,
+                &contract_id,
+                &item.user,
+                item.period,
+                &item.archetype,
+                &item.data_hash,
+                item.payload_version,
+                &item.signature,
+            );
+        }
+    }
+
+    // Process each wrap insertion
+    for item in items.iter() {
+        let wrap_key = DataKey::Wrap(item.user.clone(), item.period);
+        if e.storage().persistent().has(&wrap_key) {
+            panic_with_error!(&e, ContractError::WrapAlreadyExists);
+        }
+
+        let now = e.ledger().timestamp();
+        let record = WrapRecord {
+            timestamp: now,
+            data_hash: item.data_hash.clone(),
+            archetype: item.archetype.clone(),
+            period: item.period,
+            fsm: WrapLifecycleFSM::new(WrapState::Active, now),
+        };
+
+        e.storage().persistent().set(&wrap_key, &record);
+        e.storage()
+            .persistent()
+            .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+        storage_accounting::add_storage_bytes(
+            &e,
+            storage_accounting::estimate_wrap_bytes_new(),
+        );
+
+        let count_key = DataKey::WrapCount(item.user.clone());
+        let current_count: u32 = e.storage().persistent().get(&count_key).unwrap_or(0);
+        let next_count = current_count + 1;
+        e.storage().persistent().set(&count_key, &next_count);
+        e.storage()
+            .persistent()
+            .extend_ttl(&count_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+        let total_key = DataKey::TotalWrapCount;
+        let current_total: u32 = e.storage().persistent().get(&total_key).unwrap_or(0);
+        let next_total = current_total + 1;
+        e.storage().persistent().set(&total_key, &next_total);
+        e.storage()
+            .persistent()
+            .extend_ttl(&total_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+        if current_count == 0 {
+            storage_accounting::add_storage_bytes(
+                &e,
+                storage_accounting::estimate_wrapcount_bytes_new(),
+            );
+        }
+
+        let latest_key = DataKey::LatestPeriod(item.user.clone());
+        let current_latest: u64 = e.storage().persistent().get(&latest_key).unwrap_or(0);
+        if item.period > current_latest {
+            let was_missing = current_latest == 0;
+            e.storage().persistent().set(&latest_key, &item.period);
+            e.storage()
+                .persistent()
+                .extend_ttl(&latest_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+            if was_missing {
+                storage_accounting::add_storage_bytes(
+                    &e,
+                    storage_accounting::estimate_latest_bytes_new(),
+                );
+            }
+        }
+
+        let user_periods_key = DataKey::UserPeriods(item.user.clone());
+        let mut periods: soroban_sdk::Vec<u64> = e
+            .storage()
+            .persistent()
+            .get(&user_periods_key)
+            .unwrap_or(soroban_sdk::Vec::new(&e));
+
+        if !periods.contains(item.period) {
+            periods.push_back(item.period);
+            e.storage().persistent().set(&user_periods_key, &periods);
+            e.storage()
+                .persistent()
+                .extend_ttl(&user_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+            storage_accounting::add_storage_bytes(
+                &e,
+                storage_accounting::estimate_userperiods_bytes_new(),
+            );
+        }
+
+        e.events()
+            .publish((symbol_short!("mint"), item.user, item.period), item.archetype);
+    }
 }
 
 pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
@@ -158,7 +311,7 @@ pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_sta
         .unwrap_or_else(|| panic_with_error!(e, ContractError::WrapNotFound));
 
     let now = e.ledger().timestamp();
-    if !record.fsm.transition_to(next_state.clone(), now) {
+    if !record.fsm.transition_to(next_state, now) {
         panic_with_error!(e, ContractError::InvalidStateTransition);
     }
 
@@ -167,6 +320,8 @@ pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_sta
         .persistent()
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
-    e.events()
-        .publish((symbol_short!("trans"), user, period), next_state);
+    e.events().publish(
+        (MintEventType::Transition.to_symbol(&e), user.clone(), period),
+        MintEventData::Transition(user, period, next_state),
+    );
 }
