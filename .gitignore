@@ -1,7 +1,6 @@
 # Rust artifacts
 /target/
 /**/*.rs.bk
-Cargo.lock
 
 # WASM build artifacts
 /**/*.wasm
@@ -20,3 +19,13 @@ Cargo.lock
 Thumbs.db
 test_snapshots/
 mutants.out/
+
+# node_modules
+pipeline/node_modules/
+
+# Front-end artifacts and local public configuration
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.env
+/frontend/.env.local
+/frontend/*.tsbuildinfo

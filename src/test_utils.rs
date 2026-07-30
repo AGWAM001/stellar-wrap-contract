@@ -1,12 +1,13 @@
 #![cfg(test)]
+#![allow(dead_code)]
 
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{Address, BytesN, Env, Symbol};
 
-use crate::mint::CURRENT_PAYLOAD_VERSION;
 use crate::signature::construct_mint_payload;
 
 /// Signs the same payload layout the contract rebuilds in `mint::mint_wrap`.
+#[allow(dead_code)]
 pub(crate) fn sign_payload(
     env: &Env,
     signer: &SigningKey,
@@ -16,19 +17,9 @@ pub(crate) fn sign_payload(
     archetype: &Symbol,
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
-    sign_payload_versioned(
-        env,
-        signer,
-        contract,
-        user,
-        period,
-        archetype,
-        data_hash,
-        CURRENT_PAYLOAD_VERSION,
-    )
+    sign_payload_versioned(env, signer, contract, user, period, archetype, data_hash, 1)
 }
 
-/// Signs a mint payload for an explicit `payload_version`.
 pub(crate) fn sign_payload_versioned(
     env: &Env,
     signer: &SigningKey,
