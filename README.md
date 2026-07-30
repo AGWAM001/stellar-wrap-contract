@@ -407,7 +407,7 @@ storage layout must ship as a numbered migration:
 - Call `migrate` in the same transaction batch as the upgrade, and verify with `migration_version()`.
 ## Documentation
 
-- [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, and test vectors required by backend signing services (issue #213)
+- [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, a TypeScript/Rust backend signing example, and key-management notes for admin signing services (issues #213, #214)
 
 ## Development
 
