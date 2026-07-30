@@ -2529,3 +2529,37 @@ fn test_set_alias_hash_requires_auth() {
     let dummy_wasm_hash = BytesN::from_array(&env, &[0xBBu8; 32]);
     client.upgrade(&dummy_wasm_hash);
 }
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_mint_wrap_double_period_rejected() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[99u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let period = 202401u64;
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+
+    let sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+        CURRENT_PAYLOAD_VERSION,
+    );
+
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
+}
