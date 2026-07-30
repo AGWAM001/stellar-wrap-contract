@@ -21,9 +21,15 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
 }
 
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
-    read_admin(&e).require_auth();
+    let current_admin = read_admin(&e);
+    current_admin.require_auth();
     e.storage().instance().set(&DataKey::Admin, &new_admin);
     e.storage().instance().remove(&DataKey::PendingAdmin);
+
+    e.events().publish(
+        (symbol_short!("admin"), symbol_short!("updated")),
+        (current_admin, new_admin),
+    );
 }
 
 pub(crate) fn unpause(e: Env) {
