@@ -18,4 +18,9 @@ pub enum ContractError {
     Paused = 12,
     ArithmeticOverflow = 13,
     InvalidFeeParams = 14,
+    BridgeNotInitialized = 15,
+    InvalidChain = 16,
+    ChainDisabled = 17,
+    NonceAlreadyProcessed = 18,
+    InvalidBridgePayload = 19,
 }

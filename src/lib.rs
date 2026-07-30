@@ -21,6 +21,7 @@ use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, Byte
 
 mod admin;
 mod alias;
+mod bridge;
 mod errors;
 mod mint;
 mod queries;
@@ -30,7 +31,10 @@ mod storage_types;
 mod storage_accounting;
 
 pub use errors::ContractError;
-pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use storage_types::{
+    ContractHealth, DataKey, InboundBridgeRecord, OutboundBridgeRequest, WrapLifecycleFSM,
+    WrapRecord, WrapState,
+};
 
 #[contract]
 pub struct StellarWrapContract;
@@ -306,8 +310,86 @@ impl StellarWrapContract {
     pub fn fee_params(e: Env) -> storage_types::FeeParams {
         storage_accounting::get_fee_params(&e)
     }
+
+    /// Admin: Set the cross-chain token bridge relayer address.
+    pub fn set_bridge_relayer(e: Env, relayer: Address) {
+        bridge::set_bridge_relayer(&e, relayer);
+    }
+
+    /// Returns the configured cross-chain token bridge relayer address.
+    pub fn get_bridge_relayer(e: Env) -> Option<Address> {
+        bridge::get_bridge_relayer(&e)
+    }
+
+    /// Admin: Set enabled status for a destination/source cross-chain network chain ID.
+    pub fn set_chain_status(e: Env, chain_id: u32, enabled: bool) {
+        bridge::set_chain_status(&e, chain_id, enabled);
+    }
+
+    /// View: Check if a cross-chain network chain ID is enabled.
+    pub fn is_chain_supported(e: Env, chain_id: u32) -> bool {
+        bridge::is_chain_supported(&e, chain_id)
+    }
+
+    /// Initiate an outbound cross-chain wrap bridge transfer.
+    pub fn bridge_wrap_out(
+        e: Env,
+        user: Address,
+        destination_chain: u32,
+        recipient_address: Bytes,
+        period: u64,
+    ) -> u64 {
+        bridge::bridge_wrap_out(e, user, destination_chain, recipient_address, period)
+    }
+
+    /// Fulfill an inbound cross-chain wrap bridge transfer from external chain.
+    pub fn bridge_wrap_in(
+        e: Env,
+        source_chain: u32,
+        source_nonce: u64,
+        recipient: Address,
+        period: u64,
+        archetype: Symbol,
+        data_hash: BytesN<32>,
+    ) {
+        bridge::bridge_wrap_in(
+            e,
+            source_chain,
+            source_nonce,
+            recipient,
+            period,
+            archetype,
+            data_hash,
+        );
+    }
+
+    /// View: Fetch an outbound bridge request record by nonce.
+    pub fn get_outbound_bridge_request(e: Env, nonce: u64) -> Option<OutboundBridgeRequest> {
+        bridge::get_outbound_bridge_request(&e, nonce)
+    }
+
+    /// View: Fetch an inbound bridge record by source chain and source nonce.
+    pub fn get_inbound_bridge_record(
+        e: Env,
+        source_chain: u32,
+        source_nonce: u64,
+    ) -> Option<InboundBridgeRecord> {
+        bridge::get_inbound_bridge_record(&e, source_chain, source_nonce)
+    }
+
+    /// View: Check if an inbound cross-chain nonce was already processed.
+    pub fn is_inbound_nonce_processed(e: Env, source_chain: u32, source_nonce: u64) -> bool {
+        bridge::is_inbound_nonce_processed(&e, source_chain, source_nonce)
+    }
+
+    /// View: Get current total outbound bridge nonce count.
+    pub fn get_outbound_nonce(e: Env) -> u64 {
+        bridge::get_outbound_nonce(&e)
+    }
 }
 
+#[cfg(test)]
+mod bridge_test;
 #[cfg(test)]
 mod security_test;
 #[cfg(test)]
