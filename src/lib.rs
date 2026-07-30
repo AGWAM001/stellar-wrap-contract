@@ -133,6 +133,14 @@ impl StellarWrapContract {
         );
     }
 
+    pub fn mint_wrap_batch(
+        e: Env,
+        items: soroban_sdk::Vec<storage_types::BatchWrapItem>,
+        aggregated_signature: Option<BytesN<64>>,
+    ) {
+        mint::mint_wrap_batch(e, items, aggregated_signature);
+    }
+
     /// Transfers one wrap record and atomically charges the configured fee.
     ///
     /// The current owner (`from`) must authorize the invocation. The record is
