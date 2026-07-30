@@ -17,7 +17,9 @@
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol,
+};
 
 mod admin;
 mod alias;
@@ -26,8 +28,8 @@ mod mint;
 mod queries;
 mod revoke;
 mod signature;
-mod storage_types;
 mod storage_accounting;
+mod storage_types;
 
 pub use errors::ContractError;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
@@ -104,15 +106,18 @@ impl StellarWrapContract {
         payload_version: u32,
         signature: BytesN<64>,
     ) {
-        mint::mint_wrap(e, user, period, archetype, data_hash, payload_version, signature);
+        mint::mint_wrap(
+            e,
+            user,
+            period,
+            archetype,
+            data_hash,
+            payload_version,
+            signature,
+        );
     }
 
-    pub fn transition_wrap_state(
-        e: Env,
-        user: Address,
-        period: u64,
-        next_state: WrapState,
-    ) {
+    pub fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
         mint::transition_wrap_state(e, user, period, next_state);
     }
 
@@ -143,7 +148,12 @@ impl StellarWrapContract {
         queries::get_latest_wrap(e, user)
     }
 
-    pub fn get_wraps(e: Env, user: Address, start: u32, limit: u32) -> soroban_sdk::Vec<WrapRecord> {
+    pub fn get_wraps(
+        e: Env,
+        user: Address,
+        start: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<WrapRecord> {
         queries::get_wraps(e, user, start, limit)
     }
 
@@ -310,6 +320,8 @@ impl StellarWrapContract {
 
 #[cfg(test)]
 mod security_test;
+#[cfg(test)]
+mod storage_fee_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]

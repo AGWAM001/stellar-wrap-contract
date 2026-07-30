@@ -33,8 +33,6 @@ pub(crate) fn update_admin(e: Env, new_admin: Address) {
     );
 }
 
-
-
 pub(crate) fn set_pause(e: Env, paused: bool) {
     read_admin(&e).require_auth();
     e.storage().instance().set(&DataKey::Paused, &paused);
@@ -106,7 +104,9 @@ pub(crate) fn propose_admin(e: Env, new_admin: Address) {
         panic_with_error!(e, ContractError::AdminTransferProposalExists);
     }
 
-    e.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+    e.storage()
+        .instance()
+        .set(&DataKey::PendingAdmin, &new_admin);
 }
 
 pub(crate) fn accept_admin(e: Env) {
@@ -169,5 +169,3 @@ pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
     current_admin.require_auth();
     e.storage().instance().set(&DataKey::Symbol, &symbol);
 }
-
-

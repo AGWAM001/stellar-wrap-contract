@@ -4,13 +4,12 @@
 extern crate std;
 
 use super::*;
-use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
+use crate::signature::construct_mint_payload;
 
 use ed25519_dalek::{Signer, SigningKey};
 use proptest::prelude::*;
 use soroban_sdk::{
     testutils::Address as _,
-    xdr::ToXdr,
     Address, Bytes, BytesN, Env, Symbol,
 };
 use crate::mint::CURRENT_PAYLOAD_VERSION;
@@ -72,14 +71,7 @@ fn sign_mint(
     data_hash: &BytesN<32>,
     payload_version: u32,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
-    payload.append(&payload_version.to_xdr(env));
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
+    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash, payload_version);
 
     let mut buf = [0u8; 512];
     let len = payload.len() as usize;
