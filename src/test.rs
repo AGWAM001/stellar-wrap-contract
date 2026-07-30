@@ -946,6 +946,9 @@ fn test_instance_ttl_extended_on_mint() {
 
 #[test]
 fn test_update_admin_pubkey_success() {
+/// Issue #241: reminting after revoke must replace the archetype and emit both events.
+#[test]
+fn test_remint_after_revoke_updates_archetype() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -970,6 +973,7 @@ fn test_update_admin_pubkey_success() {
 fn test_migrate_rejects_replay() {
     let signing_key = SigningKey::from_bytes(&[14u8; 32]);
     let signing_key = SigningKey::from_bytes(&[95u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[21u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -1091,6 +1095,13 @@ fn test_fsm_valid_state_transitions() {
     let new_pubkey = BytesN::from_array(&env, &new_signing_key.verifying_key().to_bytes());
     client.update_admin_pubkey(&new_pubkey);
     let sig = sign_payload(
+    let period = 202406u64;
+    let archetype_old = symbol_short!("arch");
+    let archetype_new = symbol_short!("builder");
+    let hash_old = BytesN::from_array(&env, &[41u8; 32]);
+    let hash_new = BytesN::from_array(&env, &[42u8; 32]);
+
+    let sig_old = sign_payload(
         &env,
         &signing_key,
         &contract_id,
@@ -1355,6 +1366,31 @@ fn test_upgrade_emits_event() {
     let archetype = symbol_short!("arch");
     let data_hash = BytesN::from_array(&env, &[14u8; 32]);
     let signature = sign_payload(
+        &archetype_old,
+        &hash_old,
+    );
+    client.mint_wrap(&user, &period, &archetype_old, &hash_old, &sig_old);
+
+    let wrap_old = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap_old.archetype, archetype_old);
+
+    client.revoke_wrap(&user, &period);
+    assert!(client.get_wrap(&user, &period).is_none());
+
+    let events_after_revoke = env.events().all();
+    let (_, revoke_topics, revoke_data) = events_after_revoke
+        .last()
+        .expect("expected revoke event after revoke_wrap");
+    let revoke_topic: Symbol = revoke_topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let revoke_user: Address = revoke_topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let revoke_period: u64 = revoke_topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let revoked: bool = revoke_data.try_into_val(&env).unwrap();
+    assert_eq!(revoke_topic, symbol_short!("revoke"));
+    assert_eq!(revoke_user, user);
+    assert_eq!(revoke_period, period);
+    assert!(revoked);
+
+    let sig_new = sign_payload(
         &env,
         &signing_key,
         &contract_id,
@@ -2144,3 +2180,25 @@ fn test_upgrade_before_init_fails() {
 // change (mirroring this same read-increment-write pattern) whenever
 // revoke_wrap is built. Flagged on the issue for a scope decision on
 // whether revoke belongs in this PR or a follow-up.
+        &archetype_new,
+        &hash_new,
+    );
+    client.mint_wrap(&user, &period, &archetype_new, &hash_new, &sig_new);
+
+    let wrap_new = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap_new.archetype, archetype_new);
+    assert_eq!(wrap_new.data_hash, hash_new);
+
+    let events_after_remint = env.events().all();
+    let (_, mint_topics, mint_data) = events_after_remint
+        .last()
+        .expect("expected mint event after remint");
+    let mint_topic: Symbol = mint_topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let mint_user: Address = mint_topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let mint_period: u64 = mint_topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let mint_archetype: Symbol = mint_data.try_into_val(&env).unwrap();
+    assert_eq!(mint_topic, symbol_short!("mint"));
+    assert_eq!(mint_user, user);
+    assert_eq!(mint_period, period);
+    assert_eq!(mint_archetype, archetype_new);
+}

@@ -71,3 +71,5 @@ pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
     // Update the contract WASM with the provided hash
     e.deployer().update_current_contract_wasm(new_wasm_hash);
 }
+
+
