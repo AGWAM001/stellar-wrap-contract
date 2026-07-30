@@ -870,3 +870,404 @@ fn test_get_mint_timestamp_missing() {
 
     assert_eq!(client.get_mint_timestamp(&user, &period), None);
 }
+
+// ============================================================================
+// burn_wrap tests
+// ============================================================================
+
+#[test]
+fn test_burn_wrap_removes_wrap_from_storage() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[20u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+
+    // Mint a wrap
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    assert!(client.get_wrap(&user, &period).is_some());
+
+    // Burn the wrap
+    client.burn_wrap(&user, &period);
+
+    // Verify wrap is gone
+    assert!(client.get_wrap(&user, &period).is_none());
+}
+
+#[test]
+fn test_burn_wrap_decrements_count() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[21u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period1 = 202401u64;
+    let period2 = 202402u64;
+
+    let sig1 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period1,
+        &archetype,
+        &hash,
+    );
+    let sig2 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period2,
+        &archetype,
+        &hash,
+    );
+
+    // Mint two wraps
+    client.mint_wrap(&user, &period1, &archetype, &hash, &sig1);
+    client.mint_wrap(&user, &period2, &archetype, &hash, &sig2);
+    assert_eq!(client.balance_of(&user), 2);
+
+    // Burn one wrap
+    client.burn_wrap(&user, &period1);
+
+    // Count should be decremented
+    assert_eq!(client.balance_of(&user), 1);
+
+    // Other wrap should still exist
+    assert!(client.get_wrap(&user, &period2).is_some());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_burn_wrap_requires_owner_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[22u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_a,
+        period,
+        &archetype,
+        &hash,
+    );
+
+    // User A mints a wrap
+    client.mint_wrap(&user_a, &period, &archetype, &hash, &sig);
+
+    // User B tries to burn User A's wrap — should fail
+    client.burn_wrap(&user_b, &period);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_burn_wrap_fails_for_nonexistent_wrap() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    // Try to burn a wrap that was never created
+    client.burn_wrap(&user, &202401);
+}
+
+#[test]
+fn test_burn_wrap_emits_burn_event() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[23u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+
+    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+
+    // Clear events from mint
+    env.events().all();
+
+    // Burn the wrap
+    client.burn_wrap(&user, &period);
+
+    // Check the burn event
+    let events = env.events().all();
+    let last_event = events.last().expect("no events found");
+    let (_, topics, data) = last_event;
+
+    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_owner: Address = data.try_into_val(&env).unwrap();
+
+    assert_eq!(event_topic, symbol_short!("burn"));
+    assert_eq!(event_user, user);
+    assert_eq!(event_period, period);
+    assert_eq!(event_owner, user);
+}
+
+#[test]
+fn test_burn_wrap_owner_cannot_access_after() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[24u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+
+    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    let record_before = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(record_before.data_hash, hash);
+
+    // Burn the wrap
+    client.burn_wrap(&user, &period);
+
+    // Try to access the wrap — should return None
+    assert!(client.get_wrap(&user, &period).is_none());
+
+    // Verify data verification fails
+    let data = Bytes::from_slice(&env, b"test");
+    assert!(!client.verify_data(&user, &period, &data));
+}
+
+#[test]
+fn test_burn_wrap_only_deletes_target() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[25u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period_a = 202401u64;
+    let period_b = 202402u64;
+
+    let sig_a = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period_a,
+        &archetype,
+        &hash,
+    );
+    let sig_b = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period_b,
+        &archetype,
+        &hash,
+    );
+
+    // Mint two wraps
+    client.mint_wrap(&user, &period_a, &archetype, &hash, &sig_a);
+    client.mint_wrap(&user, &period_b, &archetype, &hash, &sig_b);
+
+    // Burn wrap A
+    client.burn_wrap(&user, &period_a);
+
+    // Wrap A should be gone
+    assert!(client.get_wrap(&user, &period_a).is_none());
+
+    // Wrap B should still exist
+    assert!(client.get_wrap(&user, &period_b).is_some());
+}
+
+#[test]
+fn test_burn_wrap_clears_latest_period() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[26u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period1 = 202401u64;
+    let period2 = 202402u64;
+
+    let sig1 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period1,
+        &archetype,
+        &hash,
+    );
+    let sig2 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period2,
+        &archetype,
+        &hash,
+    );
+
+    client.mint_wrap(&user, &period1, &archetype, &hash, &sig1);
+    client.mint_wrap(&user, &period2, &archetype, &hash, &sig2);
+
+    // Latest wrap should be period2
+    let latest_before = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest_before.period, period2);
+
+    // Burn the latest wrap
+    client.burn_wrap(&user, &period2);
+
+    // Latest wrap should now be period1
+    let latest_after = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest_after.period, period1);
+}
+
+#[test]
+fn test_burn_wrap_multiple_users_independent() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[27u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    let sig_a = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_a,
+        period,
+        &archetype,
+        &hash,
+    );
+    let sig_b = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_b,
+        period,
+        &archetype,
+        &hash,
+    );
+
+    // Both users mint for the same period
+    client.mint_wrap(&user_a, &period, &archetype, &hash, &sig_a);
+    client.mint_wrap(&user_b, &period, &archetype, &hash, &sig_b);
+
+    // Burn user A's wrap
+    client.burn_wrap(&user_a, &period);
+
+    // User A's wrap should be gone
+    assert!(client.get_wrap(&user_a, &period).is_none());
+
+    // User B's wrap should still exist (independent)
+    assert!(client.get_wrap(&user_b, &period).is_some());
+}
