@@ -16,3 +16,10 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 test_snapshots/
+
+# Front-end artifacts and local public configuration
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.env
+/frontend/.env.local
+/frontend/*.tsbuildinfo
