@@ -22,7 +22,12 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     e.events().publish((symbol_short!("init"),), admin);
 }
 
+/// Immediate admin replacement.
+///
+/// Rejected once the timelock controller is enabled — the admin must then use
+/// `schedule(TimelockAction::SetAdmin(..))` followed by `execute`.
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
+    crate::timelock::require_direct_call_allowed(&e);
     let current_admin = read_admin(&e);
     current_admin.require_auth();
     e.storage().instance().set(&DataKey::Admin, &new_admin);
@@ -80,7 +85,12 @@ pub(crate) fn migration_version(e: &Env) -> u32 {
         .unwrap_or(0)
 }
 
+/// Immediate WASM upgrade.
+///
+/// Rejected once the timelock controller is enabled — the admin must then use
+/// `schedule(TimelockAction::Upgrade(..))` followed by `execute`.
 pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+    crate::timelock::require_direct_call_allowed(&e);
     let current_admin: Address = e
         .storage()
         .instance()
@@ -108,7 +118,10 @@ pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
     e.deployer().update_current_contract_wasm(new_wasm_hash);
 }
 
+/// Step one of the two-step handover. Also disabled by the timelock, since an
+/// immediately-acceptable proposal would otherwise bypass the delay.
 pub(crate) fn propose_admin(e: Env, new_admin: Address) {
+    crate::timelock::require_direct_call_allowed(&e);
     let current_admin: Address = e
         .storage()
         .instance()
@@ -126,7 +139,11 @@ pub(crate) fn propose_admin(e: Env, new_admin: Address) {
         .set(&DataKey::PendingAdmin, &new_admin);
 }
 
+/// Step two of the two-step handover. Blocked while the timelock is enabled so
+/// a proposal made beforehand cannot be cashed in without the delay; use
+/// `cancel_proposed_admin` and reschedule through the controller instead.
 pub(crate) fn accept_admin(e: Env) {
+    crate::timelock::require_direct_call_allowed(&e);
     let _: Address = e
         .storage()
         .instance()

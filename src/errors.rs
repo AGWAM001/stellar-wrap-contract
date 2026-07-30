@@ -44,5 +44,14 @@ pub enum ContractError {
     ChainDisabled = 35,
     NonceAlreadyProcessed = 36,
     InvalidBridgePayload = 37,
+    // Merkle & Timelock errors
+    MerkleRootNotSet = 38,
+    InvalidMerkleProof = 39,
+    TimelockNotReady = 40,
+    TimelockOperationNotFound = 41,
+    TimelockOperationExists = 42,
+    InvalidTimelockDelay = 43,
+    TimelockRequired = 44,
+    TimelockAlreadyEnabled = 45,
 }
 
