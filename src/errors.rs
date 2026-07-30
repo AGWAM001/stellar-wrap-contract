@@ -13,4 +13,9 @@ pub enum ContractError {
     MigrationAlreadyApplied = 7,
     InvalidStateTransition = 8,
     WrapNotFound = 9,
+    NoAdminTransferProposal = 10,
+    AdminTransferProposalExists = 11,
+    Paused = 12,
+    ArithmeticOverflow = 13,
+    InvalidFeeParams = 14,
 }

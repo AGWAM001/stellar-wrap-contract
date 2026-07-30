@@ -2,22 +2,27 @@
 name = "stellar_wrap_contract"
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["lib", "cdylib"]
 path = "src/lib.rs"
 
+[features]
+# Enables SorobanArbitrary / testutils codegen required by cargo-fuzz targets.
+testutils = ["soroban-sdk/testutils"]
+
 [dependencies]
-soroban-sdk = "=21.7.1"
+soroban-sdk = "=27.0.3"
+# ed25519-dalek is a direct dependency (not just dev) to force Cargo version
+# unification across the dependency tree. soroban-env-host transitively depends
+# on ed25519-dalek and would otherwise resolve to an incompatible v3.0 without
+# a Cargo.lock (which is gitignored). Keep this pin synced.
+ed25519-dalek = { version = "=3.0.0", features = ["rand_core"] }
 
 [dev-dependencies]
 # Main Soroban SDK with test utilities (required for Address::generate, mock_auths, etc.)
-soroban-sdk = { version = "21.7.1", features = ["testutils"] }
-
-# Used for signature generation in property tests.
-# Pinned to 2.1.1 (latest 2.1.x patch); versions < 2.0 are vulnerable to
-# RUSTSEC-2022-0093 (double public key signing oracle attack), fixed in 2.0+.
-ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
+soroban-sdk = { version = "=27.0.3", features = ["testutils"] }
 
 # Property-based testing
 proptest = { version = "1", default-features = false, features = ["alloc"] }

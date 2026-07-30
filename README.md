@@ -82,6 +82,7 @@ Backend signers must include this version byte in all new mint signatures. This 
   Returns the wrap record for the specified user and period. Safe to call before initialization — returns `None` if the contract has not been initialized or if no wrap exists for the given user and period.
 - `balance_of(e: Env, user: Address) -> i128`
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
+- `verify_with_oracle(e: Env, oracle: Address, data_hash: BytesN<32>) -> bool`
 - `get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord>`
 - `get_admin(e: Env) -> Option<Address>`
 - `health(e: Env) -> ContractHealth`
@@ -89,6 +90,25 @@ Backend signers must include this version byte in all new mint signatures. This 
 - `symbol(e: Env) -> String`
 - `decimals(e: Env) -> u32`
 - `migration_version(e: Env) -> u32`
+
+## Oracle hash verification
+
+`verify_with_oracle` performs a read-only cross-contract call to the supplied
+oracle address. A compatible oracle exposes this ABI:
+
+```text
+verify_data_hash(data_hash: BytesN<32>) -> bool
+```
+
+The hash is forwarded unchanged. The oracle returns `true` when its
+decentralized verification process recognizes the hash and `false` when it
+does not. Contract invocation failures, a missing method, and incompatible
+return values propagate as call errors; they are never converted to `false`.
+
+The caller supplies the oracle address, so a `true` response is only as
+trustworthy as that selected oracle. Applications should use a vetted oracle
+contract ID from their own configuration. This method does not mutate wrap
+records and does not replace the local `verify_data` comparison.
 
 ## Event schemas
 
@@ -153,6 +173,28 @@ soroban contract invoke \
 
 Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
 
+## Security model
+
+Mint signatures are verified over a canonical payload that binds the request to:
+
+- a domain separator (`stellar-wrap-v1`)
+- the deploying contract instance address
+- the target user address
+- the period (`YYYYMM`)
+- the archetype symbol
+- the data hash
+
+The payload is constructed by concatenating the XDR-encoded fields in the order above. Off-chain signers should use the same byte layout when creating signatures:
+
+1. encode the domain separator as raw bytes
+2. append the XDR encoding of the contract address
+3. append the XDR encoding of the user address
+4. append the XDR encoding of the period as `u64`
+5. append the XDR encoding of the archetype symbol
+6. append the XDR encoding of the 32-byte data hash
+
+This ensures that a signature for one contract instance cannot be replayed against another deployment with the same admin key.
+
 ## Event schema
 
 Successful wrap mints emit one event:
@@ -175,9 +217,20 @@ Successful wrap mints emit one event:
 
 ### Admin update event
 
-The `update_admin` function does **not** emit an event. To track admin changes, indexers should:
-- Query the `get_admin(e)` function periodically
-- Store the current admin address and detect changes across queries
+Successful admin rotations emit one event:
+
+- **Topic 0**: `admin` (`Symbol`)
+- **Topic 1**: `updated` (`Symbol`)
+- **Data**: `(old_admin, new_admin)` (`Address`, `Address`) — previous admin and newly assigned admin
+
+**Example values:**
+- Topic 0: `admin`
+- Topic 1: `updated`
+- Data: `(GOLDADMIN..., GNEWADMIN...)`
+
+**Properties relevant to indexers:**
+- The event is emitted only after the current admin authorizes the call and storage is updated
+- Indexers can track admin rotations without polling `get_admin(e)`, but should still verify the live admin via that query when enforcing privileged flows
 
 ### Revoke event
 
@@ -409,11 +462,42 @@ Run the test suite with:
 | Format check (CI) | `cargo fmt --check` or `make fmt-check` |
 | Lint | `cargo clippy -- -D warnings` or `make lint` |
 | Test | `cargo test` or `make test` |
+| Fuzz `mint_wrap` | `make fuzz FUZZ_SECONDS=30` |
 | Release build (WASM) | `cargo build --release --target wasm32-unknown-unknown` or `make build` |
 | Deploy to testnet | `make deploy-testnet` |
 | Docker reproducible build | `make docker-build` or `docker build -t stellar-wrap-contract .` |
 
 See the `Makefile` for the full list of targets (`make help`).
+
+### Fuzzing `mint_wrap`
+
+This repo ships a [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz) target that
+stresses `mint_wrap` with adversarial periods, hashes, and signatures
+(`fuzz/fuzz_targets/fuzz_mint_wrap.rs`).
+
+Prerequisites:
+
+```bash
+rustup install nightly
+rustup component add rust-src --toolchain nightly
+cargo install --locked cargo-fuzz
+```
+
+Build / run (ThreadSanitizer + `build-std` is required on macOS):
+
+```bash
+make fuzz-build
+make fuzz FUZZ_SECONDS=30
+# equivalent:
+cargo +nightly fuzz run --sanitizer=thread --build-std fuzz_mint_wrap -- -max_total_time=30
+```
+
+Invariants checked by the harness:
+
+- Invalid periods never persist a wrap or change balances
+- Rogue signatures never mint
+- A valid admin signature + valid period mints exactly once
+- Reminting the same `(user, period)` always fails without changing balance
 
 ### Troubleshooting
 
@@ -451,3 +535,20 @@ Ensure `wasm32-unknown-unknown` is the active target and no host-specific native
 ## Mainnet deployment
 
 Before deploying to mainnet, review the release checklist in [MAINNET_RELEASE_CHECKLIST.md](MAINNET_RELEASE_CHECKLIST.md). It covers tests, optimized builds, release artifact hash verification, signer backup, initialization, and rollback guidance.
+### Gas Analysis
+
+The contract includes gas analysis tests that measure CPU instructions and memory usage
+of mint operations. These tests always run assertions on resource bounds, but detailed
+budget tables are suppressed during normal test runs to keep CI output clean.
+
+To run tests with full gas budget reporting:
+
+```bash
+make test-gas-report
+# or
+SOROBAN_GAS_REPORT=1 cargo test -- --nocapture
+```
+
+> **Note:** The Soroban test framework automatically creates snapshot files under
+> `test_snapshots/` during test execution. These are already in `.gitignore` and
+> can be cleaned up with `make clean-snapshots`.

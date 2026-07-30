@@ -4,15 +4,13 @@
 extern crate std;
 
 use super::*;
-use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
 
 use ed25519_dalek::{Signer, SigningKey};
 use proptest::prelude::*;
-use soroban_sdk::{
-    testutils::Address as _,
-    xdr::ToXdr,
-    Address, Bytes, BytesN, Env, Symbol,
-};
+use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, Symbol};
+
+use crate::mint::CURRENT_PAYLOAD_VERSION;
+use crate::signature::construct_mint_payload;
 
 // ── Shared test constants ────────────────────────────────────────────────────
 
@@ -69,14 +67,17 @@ fn sign_mint(
     period: u64,
     archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
+    let payload = construct_mint_payload(
+        env,
+        contract,
+        user,
+        period,
+        archetype,
+        data_hash,
+        payload_version,
+    );
 
     let mut buf = [0u8; 512];
     let len = payload.len() as usize;
@@ -117,9 +118,9 @@ proptest! {
         let data_hash = make_data_hash(&env, raw_hash);
         let archetype = Symbol::new(&env, archetype_str);
 
-        let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash);
+        let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash, CURRENT_PAYLOAD_VERSION);
 
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &sig);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
         let record = client.get_wrap(&user, &period)
             .expect("get_wrap must return Some after successful mint");
@@ -147,9 +148,9 @@ proptest! {
         for (k, &period) in periods.iter().enumerate() {
             let data_hash = make_data_hash(&env, [(k as u8).wrapping_add(1); 32]);
 
-            let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash);
+            let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash, CURRENT_PAYLOAD_VERSION);
 
-            client.mint_wrap(&user, &period, &archetype, &data_hash, &sig);
+            client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
             let expected_balance = (k as u32) + 1;
             prop_assert_eq!(client.balance_of(&user), expected_balance);
@@ -171,13 +172,13 @@ proptest! {
         let archetype = Symbol::new(&env, archetype_str);
 
         let data_hash_first = make_data_hash(&env, raw_hash_first);
-        let sig_first = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash_first);
-        client.mint_wrap(&user, &period, &archetype, &data_hash_first, &sig_first);
+        let sig_first = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash_first, CURRENT_PAYLOAD_VERSION);
+        client.mint_wrap(&user, &period, &archetype, &data_hash_first, &CURRENT_PAYLOAD_VERSION, &sig_first);
 
         let data_hash_second = make_data_hash(&env, raw_hash_second);
-        let sig_second = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash_second);
+        let sig_second = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash_second, CURRENT_PAYLOAD_VERSION);
 
-        let result = client.try_mint_wrap(&user, &period, &archetype, &data_hash_second, &sig_second);
+        let result = client.try_mint_wrap(&user, &period, &archetype, &data_hash_second, &CURRENT_PAYLOAD_VERSION, &sig_second);
         prop_assert!(result.is_err());
 
         let stored = client.get_wrap(&user, &period).expect("original wrap must still exist");
@@ -197,9 +198,9 @@ proptest! {
         let archetype = Symbol::new(&env, archetype_str);
         let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
 
-        let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &zero_hash);
+        let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &zero_hash, CURRENT_PAYLOAD_VERSION);
 
-        let result = client.try_mint_wrap(&user, &period, &archetype, &zero_hash, &sig);
+        let result = client.try_mint_wrap(&user, &period, &archetype, &zero_hash, &CURRENT_PAYLOAD_VERSION, &sig);
         prop_assert!(result.is_err());
     }
 }
@@ -222,9 +223,9 @@ proptest! {
 
         for (k, &period) in periods.iter().enumerate() {
             let data_hash = make_data_hash(&env, [(k as u8).wrapping_add(2); 32]);
-            let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash);
+            let sig = sign_mint(&env, &signing_key, &contract_id, &user, period, &archetype, &data_hash, CURRENT_PAYLOAD_VERSION);
 
-            client.mint_wrap(&user, &period, &archetype, &data_hash, &sig);
+            client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
             let new_balance = client.balance_of(&user);
             prop_assert!(new_balance > prev_balance);
