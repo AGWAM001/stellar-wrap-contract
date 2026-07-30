@@ -89,7 +89,28 @@ Backend signers must include this version byte in all new mint signatures. This 
 - `symbol(e: Env) -> String`
 - `decimals(e: Env) -> u32`
 - `migration_version(e: Env) -> u32`
+## Contract error codes
 
+These codes correspond directly to the `ContractError` enum in `src/errors.rs`.
+
+| Code | Error | Trigger condition |
+|---|---|---|
+| `1` | `AlreadyInitialized` | `initialize()` called when the contract already has admin state configured |
+| `2` | `NotInitialized` | A query or admin-only action is attempted before the contract has been initialized |
+| `3` | `Unauthorized` | A privileged operation is attempted without the required admin authorization |
+| `4` | `WrapAlreadyExists` | `mint_wrap()` called for a `(user, period)` pair that already has a wrap |
+| `5` | `InvalidSignature` | `mint_wrap()` receives a signature that does not verify against the admin public key or payload data |
+| `6` | `InvalidPeriod` | `mint_wrap()` is called with a `period` outside `202401..=210012` or with invalid month/day encoding |
+| `7` | `MigrationAlreadyApplied` | `migrate()` is called with a version that is not greater than the already-applied migration version |
+| `8` | `InvalidStateTransition` | A requested wrap state transition is not allowed by the wrap lifecycle FSM |
+| `9` | `WrapNotFound` | A lookup or update is attempted for a wrap record that does not exist |
+| `10` | `NoAdminTransferProposal` | `accept_admin()` or `cancel_proposed_admin()` is called when no admin transfer proposal exists |
+| `11` | `AdminTransferProposalExists` | `propose_admin()` is called while an admin transfer proposal already exists |
+| `12` | `Paused` | A mint or state transition is attempted while the contract is paused |
+| `13` | `ArithmeticOverflow` | Internal accounting arithmetic overflow is detected |
+| `14` | `InvalidFeeParams` | Invalid fee parameters are supplied to a fee-related accounting operation |
+
+> Note: authorization failures from Soroban are reported separately as `Error(Auth, ...)` rather than `Error(Contract, #N)`. For example, missing `require_auth()` authorization on `mint_wrap()`, `update_admin()`, or other admin-only calls will fail with Soroban auth errors.
 ## Event schemas
 
 ### Mint event
