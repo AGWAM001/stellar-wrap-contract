@@ -12,9 +12,9 @@ For developer-facing error handling (e.g. `Error(Contract, #4)`), see the
 ## ✅ Signature Verification — Implemented (Ed25519)
 
 ### Current State
-`mint_wrap()` and `update_wrap()` perform real Ed25519 cryptographic signature
-verification using Soroban's built-in `e.crypto().ed25519_verify()`. The old
-unconditional stub (`fn verify_signature() -> bool { true }`) no longer exists.
+All mint operations perform real Ed25519 cryptographic signature verification
+using Soroban's built-in `e.crypto().ed25519_verify()`. Verification is
+implemented in `src/signature.rs` via the `verify_mint_signature()` function.
 
 ### How It Works
 
@@ -25,28 +25,66 @@ against the stored admin public key before minting.
 #### Payload construction (`mint_wrap`)
 
 ```
-payload = XDR(contract_address)
-        ‖ XDR(user)
-        ‖ XDR(period)        // u64 — prevents period replay
+payload = b"stellar-wrap-v1"                   // domain separator (15 bytes)
+        ‖ XDR(payload_version: u32)             // currently 1
+        ‖ XDR(contract_address)                 // cross-contract replay protection
+        ‖ XDR(user)                             // identity binding
+        ‖ XDR(period)                           // u64 — prevents period replay
         ‖ XDR(archetype)
-        ‖ XDR(data_hash)     // SHA-256 of off-chain JSON
+        ‖ XDR(data_hash)                        // SHA-256 of off-chain JSON
 ```
+
+The domain separator (`b"stellar-wrap-v1"`) makes the payload self-describing and
+prevents ambiguity if the same Ed25519 key is reused across contracts or signing
+schemes. A `payload_version` field follows the domain separator; the contract
+currently accepts version `1` only, and backend signers must use this version for
+all new signatures.
 
 Each field is XDR-encoded before concatenation, which provides unambiguous
 length-delimited framing and prevents field-boundary collisions.
 
 #### On-chain verification (Rust)
 
-```rust
-let mut payload = Bytes::new(&e);
-payload.append(&e.current_contract_address().to_xdr(&e));   // cross-contract replay protection
-payload.append(&user.clone().to_xdr(&e));                   // identity binding
-payload.append(&period.to_xdr(&e));                         // period binding
-payload.append(&archetype.clone().to_xdr(&e));
-payload.append(&data_hash.clone().to_xdr(&e));
+The actual verification lives in `src/signature.rs`:
 
-// Panics with ContractError::InvalidSignature (code 6) on failure
-e.crypto().ed25519_verify(&admin_pubkey, &payload, &signature);
+```rust
+pub fn verify_mint_signature(
+    e: &Env,
+    admin_pubkey: &BytesN<32>,
+    contract_id: &Address,
+    user: &Address,
+    period: u64,
+    archetype: &Symbol,
+    data_hash: &BytesN<32>,
+    payload_version: u32,
+    signature: &BytesN<64>,
+) -> Result<(), ContractError> {
+    let payload = construct_mint_payload(
+        e, contract_id, user, period, archetype, data_hash, payload_version,
+    );
+    e.crypto().ed25519_verify(admin_pubkey, &payload, signature);
+    Ok(())
+}
+
+fn construct_mint_payload(
+    e: &Env,
+    contract_id: &Address,
+    user: &Address,
+    period: u64,
+    archetype: &Symbol,
+    data_hash: &BytesN<32>,
+    payload_version: u32,
+) -> Bytes {
+    let mut payload = Bytes::new(e);
+    payload.append(&Bytes::from_array(e, MINT_DOMAIN_SEPARATOR));
+    payload.append(&payload_version.to_xdr(e));
+    payload.append(&contract_id.to_xdr(e));
+    payload.append(&user.clone().to_xdr(e));
+    payload.append(&period.to_xdr(e));
+    payload.append(&archetype.clone().to_xdr(e));
+    payload.append(&data_hash.clone().to_xdr(e));
+    payload
+}
 ```
 
 `ed25519_verify` panics (traps) when verification fails — the transaction is
@@ -58,14 +96,19 @@ rolled back and no state is written.
 import { xdr, Address } from "@stellar/stellar-sdk";
 import * as nacl from "tweetnacl";
 
+const MINT_DOMAIN_SEPARATOR = Buffer.from("stellar-wrap-v1", "utf-8");
+
 function buildMintPayload(
   contractId: string,
   userAddress: string,
   period: bigint,
   archetype: string,
-  dataHash: Uint8Array
+  dataHash: Uint8Array,
+  payloadVersion: number = 1,
 ): Uint8Array {
   const parts: Uint8Array[] = [
+    MINT_DOMAIN_SEPARATOR,
+    xdr.Uint64.fromBigInt(BigInt(payloadVersion)).toXDR(),
     xdr.ScAddress.scAddressTypeContract(Buffer.from(contractId, "hex")).toXDR(),
     Address.fromString(userAddress).toXDR(),
     xdr.Uint64.fromBigInt(period).toXDR(),
@@ -75,9 +118,9 @@ function buildMintPayload(
   return Buffer.concat(parts);
 }
 
-const payload  = buildMintPayload(contractId, user, period, archetype, dataHash);
+const payload  = buildMintPayload(contractId, user, period, archetype, dataHash, 1);
 const signature = nacl.sign.detached(payload, adminSecretKey);
-// Pass signature (64 bytes) as the `signature` argument to mint_wrap()
+// Pass signature (64 bytes) alongside payload_version=1 to mint_wrap()
 ```
 
 ### Security Properties Provided
@@ -85,7 +128,7 @@ const signature = nacl.sign.detached(payload, adminSecretKey);
 | Property | How it is enforced |
 |---|---|
 | **Identity binding** | `user` is in the payload; a signature for Alice cannot be used by Bob |
-| **Cross-contract replay** | `contract_address` is the first payload field |
+| **Cross-contract replay** | `contract_address` is included in the payload; a signature for contract V1 cannot be replayed against V2 |
 | **Period replay** | `period` is in the payload; same user cannot reuse a signature for a different period |
 | **Data integrity** | `data_hash` (SHA-256 of JSON) is in the payload and also stored on-chain |
 | **Duplicate prevention** | `WrapAlreadyExists` check after signature verification |
@@ -220,18 +263,25 @@ mainnet.
 user data at scale.
 
 ### 4. Fuzz Testing
-**Status:** PENDING
+**Status:** OPERATIONAL
 
-Consider adding property-based or fuzz tests:
-- No user should have duplicate periods.
-- Sum of all `WrapCount` values should equal `TotalMints`.
-- Any random 64-byte blob passed as `signature` must be rejected.
+`cargo-fuzz` target `fuzz_mint_wrap` exercises `mint_wrap` with adversarial
+periods, hashes, and signatures. The harness asserts:
+
+- Invalid periods never persist wraps or change balances.
+- Rogue signatures never mint.
+- Valid mints increment balance exactly once.
+- Remints of the same `(user, period)` return `WrapAlreadyExists`.
 
 ```bash
-cargo install cargo-fuzz
-cargo fuzz init
-cargo fuzz run fuzz_target_1
+rustup install nightly
+rustup component add rust-src --toolchain nightly
+cargo install --locked cargo-fuzz
+# or: make fuzz-build && make fuzz FUZZ_SECONDS=30
+cargo +nightly fuzz run --sanitizer=thread --build-std fuzz_mint_wrap -- -max_total_time=30
 ```
+
+See README **Fuzzing `mint_wrap`** for setup details.
 
 ### 5. Upgrade Key Control
 **Status:** OPERATIONAL CONCERN
@@ -239,6 +289,119 @@ cargo fuzz run fuzz_target_1
 `upgrade()` requires admin authorization. If the admin keypair is compromised, an
 attacker could replace the WASM. Consider a time-lock or multi-sig admin for
 production.
+
+---
+
+## 🔄 Payload Versioning & Backend Migration Process (#274)
+
+### Why Payload Versioning Exists
+
+The canonical payload format may evolve (e.g., adding new signed fields like `metadata`,
+`archetype_allowlist_revision`, or `expiry_ledger`). Without a version prefix,
+a signature produced against an older payload schema could be successfully
+re-submitted to a newer contract if the remaining fields happen to match — a
+cross-version replay attack.
+
+This contract defends against this by:
+
+1. Prepending a **domain separator** (`b"stellar-wrap-v1"`) followed by
+   `payload_version: u32` as the first two elements of every signed payload.
+2. Rejecting any `mint_wrap` call where the provided `payload_version` does not
+   equal `CURRENT_PAYLOAD_VERSION` (currently `1`) — it panics with
+   `Error(Contract, #5)` / `ContractError::InvalidSignature`.
+
+**On-chain payload (v1):
+```
+payload = b"stellar-wrap-v1"                   // domain separator (15 bytes)
+        ‖ XDR(payload_version: u32)             // currently 1
+        ‖ XDR(contract_address)
+        ‖ XDR(user)
+        ‖ XDR(period)
+        ‖ XDR(archetype)
+        ‖ XDR(data_hash)
+```
+
+### On-chain Version Evolution Rules
+- **Rust location:** `src/mint.rs:8` (`CURRENT_PAYLOAD_VERSION = 1`)
+- **Validation:** `src/mint.rs:19-23` (`validate_payload_version`)
+- **Payload construction:** `src/signature.rs` (`construct_mint_payload`) — domain separator + version are the first bytes
+
+### Backend Migration Checklist
+
+#### Step 1 — Contract upgrade (Soroban CLI)
+
+Bump the version number in `src/mint.rs:8` (`CURRENT_PAYLOAD_VERSION = 1 -> 2`),
+then redeploy the WASM via `soroban contract upgrade`, and update the payload schema
+(see `Makefile` targets).
+
+#### Step 2 — Backend signing code update
+
+When the new contract lands on-chain, update the backend signer to include the new
+version:
+
+```python
+# BEFORE (no version prefix — old format)
+payload = (
+    contract.to_xdr()
+    + user.to_xdr()
+    + period.to_xdr()
+    + archetype.to_xdr()
+    + data_hash.to_xdr()
+)
+signature = admin_ed25519_sign(payload)
+
+# AFTER — prepend domain separator and payload_version
+DOMAIN_SEPARATOR = b"stellar-wrap-v1"
+payload_version = 2  # MUST match CURRENT_PAYLOAD_VERSION in src/mint.rs
+payload = (
+    DOMAIN_SEPARATOR
+    + xdr_u32(payload_version)
+    + contract.to_xdr()
+    + user.to_xdr()
+    + period.to_xdr()
+    + archetype.to_xdr()
+    + data_hash.to_xdr()
+)
+signature = admin_ed25519_sign(payload)
+```
+
+> **Order matters:** The domain separator MUST be first, followed immediately by `payload_version`,
+> because the contract constructs the payload in that exact order in `src/signature.rs`.
+
+#### Step 3 — Cutover & dual-signing
+
+To avoid a race window during the WASM upgrade:
+1. First deploy backend code that temporarily accepts both old and new payload versions,
+   keeping the existing contract unchanged.
+2. Upgrade the contract to only accept the new version.
+3. Once all backend clients have migrated, remove backward compatibility from the backend.
+
+*Option A — Two-phase deploy:*
+First deploy a contract version that accepts both v1 and v2 signatures (by
+widening `validate_payload_version` to accept an allow list), then swap back
+once all backend clients have migrated.
+
+*Option B (simpler, recommended):*
+Perform the contract upgrade in a single ledger window; do not send mints
+during the swap. Sequence the upgrade so that backend switches to signing
+v2 first, then the contract is upgraded.
+
+#### Step 4 — Verify against replay safety
+
+After upgrade:
+```bash
+cargo test test_cross_version_replay  # run the version-gating tests
+cargo test test::test_same_version_sig_succeeds
+```
+
+Tests covering the attack vectors:
+
+| Test | Attack | Result |
+|------|--------|--------|
+| `test_cross_version_replay_v0_sig_submitted_as_v1_fails` | Sign with v0 = 0; submit with v=CURRENT=1 | PANIC #5 |
+| `test_cross_version_replay_v2_sig_submitted_as_v1_fails` | Sign with v2; submit with v=CURRENT=1 | PANIC #5 |
+| `test_same_version_sig_succeeds` | Sign and submit same v=CURRENT | SUCCESS |
+| `test_wrong_payload_version_alone_fails_even_with_matching_sig` | Sign v=CURRENT but submit v=99 | PANIC #5 |
 
 ---
 
@@ -396,6 +559,64 @@ same period, which contradicts the SBT one-record-per-period model.
 
 ---
 
+## 🕒 TTL Lifecycle & Data Freshness
+
+### Current TTL Strategy
+
+All persistent storage entries are created with a TTL of **~1 year** (17280 × 365 ledgers):
+
+| Key | TTL Set At | Auto-Renewed On Mint? |
+|-----|-----------|----------------------|
+| `Wrap(user, period)` | `mint_wrap` | ❌ No — fixed at creation |
+| `WrapCount(user)` | `mint_wrap` | ✅ Yes — extended on every mint |
+| `LatestPeriod(user)` | `mint_wrap` | ✅ Yes — extended on every mint |
+| Contract instance | `extend_ttl` / `renew_all_ttls` | ✅ Yes — extended on every mint (via metadata keys) |
+
+### Design Decision: Auto-Renew Metadata Only
+
+**Chosen approach:** Auto-renew `WrapCount` and `LatestPeriod` metadata on every `mint_wrap`, but **not** individual historical wrap records.
+
+**Rationale:**
+- Metadata keys are small, cheap to extend, and essential for core queries (`balance_of`, `get_latest_wrap`)
+- Historical wraps are numerous — iterating them on every mint would be expensive (see gas analysis)
+- Full wrap enumeration requires period tracking, tracked as [Issue #90](https://github.com/zintarh/stellar-wrap-contract/issues/90)
+
+**Tradeoffs:**
+- ✅ Active users' metadata stays alive automatically
+- ✅ New wraps are always fully covered
+- ✅ Gas cost per mint is bounded and predictable
+- ❌ Historical wraps of long-active users could expire after ~1 year
+- ❌ Requires off-chain bots or admin to call `extend_ttl` for old periods of active users
+- ❌ Without [#90](https://github.com/zintarh/stellar-wrap-contract/issues/90), there is no way to enumerate a user's periods on-chain
+
+### Mitigation Recommendations
+
+1. **Off-chain renewal bot:** Run a cron job that calls `extend_ttl(user, period)` for all periods of users who have minted in the last 6 months
+2. **Admin bulk renewal:** Call `renew_all_ttls(user)` periodically for active users to renew their metadata keys
+3. **Future enhancement:** Implement period enumeration ([#90](https://github.com/zintarh/stellar-wrap-contract/issues/90)) to enable full auto-renewal on mint
+
+### Gas Analysis: Auto-Renewal Cost
+
+| Operation | Cost (CPU instructions) |
+|-----------|------------------------|
+| Single `extend_ttl` for 1 wrap | ~[TBD — run `test_gas_analysis`] |
+| Single `extend_ttl` for 5 wraps | ~[TBD — run `test_gas_analysis`] |
+| Auto-renew metadata in `mint_wrap` | Already included in mint cost (3 extend_ttl calls) |
+| 10 historical wraps + metadata | ~10× single wrap cost |
+
+> **Current implementation already extends 3 keys** on every mint (new wrap, WrapCount, LatestPeriod). Extending N additional historical wraps would add N× the cost of a single `extend_ttl`. For a user with 12 monthly wraps, auto-renewing all 12 would cost ~4× the current mint cost.
+
+### Test Coverage for TTL
+
+| Test | Purpose |
+|------|---------|
+| `test_metadata_ttl_extended_on_new_mint` | Verifies `WrapCount` and `LatestPeriod` survive after multiple mints |
+| `test_old_wrap_preserved_on_new_mint` | Verifies old wraps are not lost when new wraps are minted |
+| `test_renew_all_ttls_extends_metadata` | Verifies admin bulk-renewal works |
+| `test_renew_all_ttls_requires_admin_auth` | Verifies admin authorization is required |
+| `test_renew_all_ttls_before_init_fails` | Verifies failure before initialization |
+
+---
 ## 📚 Additional Security Best Practices
 
 ### Invariant Testing
