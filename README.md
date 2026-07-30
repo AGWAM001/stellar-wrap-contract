@@ -64,7 +64,18 @@ Returned by `health()`, reports:
 - `update_admin(e: Env, new_admin: Address)`
 - `mint_wrap(e: Env, user: Address, period: u64, archetype: Symbol, data_hash: BytesN<32>, signature: BytesN<64>)`
 - `migrate(e: Env, version: u32)`
+### Mint signature payload versioning
 
+The contract requires mint signatures over a versioned canonical payload. The current payload format is:
+
+- `0x01` — payload version byte
+- `XDR(contract_address)`
+- `XDR(user)`
+- `XDR(period)`
+- `XDR(archetype)`
+- `XDR(data_hash)`
+
+Backend signers must include this version byte in all new mint signatures. This version field allows the contract and backend to evolve safely without ambiguous verification behavior.
 ### Read methods
 
 - `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`  

@@ -4,6 +4,7 @@
 extern crate std;
 
 use super::*;
+use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
 
 use ed25519_dalek::{Signer, SigningKey};
 use proptest::prelude::*;
@@ -70,6 +71,7 @@ fn sign_mint(
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
     let mut payload = Bytes::new(env);
+    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
     payload.append(&contract.to_xdr(env));
     payload.append(&user.clone().to_xdr(env));
     payload.append(&period.to_xdr(env));

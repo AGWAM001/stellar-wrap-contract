@@ -5,6 +5,8 @@ extern crate std;
 use super::*;
 use crate::test_utils::sign_payload;
 use ed25519_dalek::SigningKey;
+use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
+use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events},
@@ -38,6 +40,7 @@ fn sign_payload(
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
     let mut payload = Bytes::new(env);
+    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
     payload.append(&contract.to_xdr(env));
     payload.append(&user.clone().to_xdr(env));
     payload.append(&period.to_xdr(env));
