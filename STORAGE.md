@@ -295,16 +295,58 @@ So:
 
 ---
 
-## 8) Summary table of DataKey variants
+## 8) Staking mechanism storage
+
+The staking feature (`src/stake.rs`) lets users stake tokens to earn fee
+priority when minting wraps. It uses the following persistent and instance
+storage keys:
+
+### Persistent storage (per user)
+
+- `DataKey::Stake(Address)` → `StakeRecord`
+  - `amount: i128` — currently staked amount
+  - `staked_at: u64` — ledger timestamp when first staked
+  - `unstaking_at: u64` — 0 when active; non-zero when unstake initiated
+
+TTL is extended to ~1 year on every write (`stake`, `unstake`).
+
+### Instance storage (shared)
+
+- `DataKey::StakeConfig` → `StakeConfig`
+  - `min_stake: i128` — minimum stake amount (default: 100)
+  - `cooldown_seconds: u64` — withdrawal delay after unstaking (default: 7 days)
+  - `priority_multiplier_bps: u32` — discount per `min_stake` multiple (default: 1000 = 10%)
+  - `max_priority_bps: u32` — maximum discount cap (default: 5000 = 50%)
+- `DataKey::TotalStaked` → `i128` — aggregate of all users' staked amounts
+
+### Priority calculation
+
+`priority = min( (amount / min_stake) * priority_multiplier_bps, max_priority_bps )`
+
+Users with no stake or an active unstake receive 0 priority (no discount).
+
+### Fee discount
+
+`discounted_fee = raw_fee - (raw_fee * priority_bps / 10_000)`
+
+The `get_discounted_fee` query applies the user's priority to the raw fee
+returned by `compute_current_fee`.
+
+---
+
+## 9) Summary table of DataKey variants
 
 | DataKey variant | Tier | Value type | TTL setting | Notes |
 |---|---|---|---|---|
 | `Admin` | instance | `Address` | shared instance lifecycle | set once during `initialize()` |
 | `AdminPubKey` | instance | `BytesN<32>` | shared instance lifecycle | set once during `initialize()` |
+| `PendingAdmin` | instance | `Address` | shared instance lifecycle | set during two-step admin transfer |
 | `Wrap(Address, u64)` | persistent | `WrapRecord` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | exists per `(user, period)`; duplicated check uses `has()` |
 | `WrapCount(Address)` | persistent | `u32` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | incremented each `mint_wrap()` |
 | `LatestPeriod(Address)` | persistent | `u64` | `extend_ttl(..., ttl_one_year, ttl_one_year)` only when updated | updated when `period` increases |
-| `MintGuard(Address)` | temporary | `bool` (stored as `true`) | auto-cleaned (temporary TTL) | removed explicitly on success |
+| `Stake(Address)` | persistent | `StakeRecord` | `extend_ttl(..., ttl_one_year, ttl_one_year)` on write | tracks user's staking position |
+| `StakeConfig` | instance | `StakeConfig` | shared instance lifecycle | admin-configurable staking parameters |
+| `TotalStaked` | instance | `i128` | shared instance lifecycle | aggregate of all staked amounts |
 
 ---
 

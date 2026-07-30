@@ -17,7 +17,7 @@
 #[cfg(test)]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String};
 
 mod admin;
 mod alias;
@@ -26,11 +26,12 @@ mod mint;
 mod queries;
 mod revoke;
 mod signature;
+mod stake;
 mod storage_types;
 mod storage_accounting;
 
 pub use errors::ContractError;
-pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use storage_types::{ContractHealth, DataKey, StakeConfig, StakeRecord, WrapLifecycleFSM, WrapRecord, WrapState};
 
 #[contract]
 pub struct StellarWrapContract;
@@ -306,10 +307,91 @@ impl StellarWrapContract {
     pub fn fee_params(e: Env) -> storage_types::FeeParams {
         storage_accounting::get_fee_params(&e)
     }
+
+    // ── Staking ──────────────────────────────────────────────────────────
+
+    /// Stake tokens to earn wrap fee priority.
+    ///
+    /// The amount must be at least the configured `min_stake`. Staking more
+    /// tokens increases the user's priority, which translates to a fee
+    /// discount (in basis points) when minting wraps.
+    ///
+    /// # Authorization
+    /// `user` must authorize the call.
+    pub fn stake(e: Env, user: Address, amount: i128) {
+        stake::stake(e, user, amount);
+    }
+
+    /// Initiate the unstaking process.
+    ///
+    /// After calling this, the user must wait for the cooldown period
+    /// (configured in `StakeConfig`) before they can withdraw their stake
+    /// via [`withdraw_stake`].
+    ///
+    /// While unstaking is in progress, the user receives no fee priority.
+    ///
+    /// # Authorization
+    /// `user` must authorize the call.
+    pub fn unstake(e: Env, user: Address) {
+        stake::unstake(e, user);
+    }
+
+    /// Complete the unstaking process and withdraw staked funds.
+    ///
+    /// Can only be called after the cooldown period has elapsed since
+    /// [`unstake`] was called.
+    ///
+    /// # Authorization
+    /// `user` must authorize the call.
+    pub fn withdraw_stake(e: Env, user: Address) {
+        stake::withdraw_stake(e, user);
+    }
+
+    /// Return the staking record for `user`, or `None` if they have not staked.
+    pub fn get_stake(e: Env, user: Address) -> Option<StakeRecord> {
+        stake::get_stake(&e, user)
+    }
+
+    /// Return the fee-discount priority (in basis points) for `user`.
+    ///
+    /// Returns 0 if the user has no active stake.
+    pub fn get_stake_priority(e: Env, user: Address) -> u32 {
+        stake::get_stake_priority(&e, user)
+    }
+
+    /// Return the total amount staked across all users.
+    pub fn total_staked(e: Env) -> i128 {
+        stake::get_total_staked(&e)
+    }
+
+    /// Admin: set the staking configuration.
+    ///
+    /// # Panics
+    /// - If `min_stake == 0` or `cooldown_seconds == 0`
+    /// - If `max_priority_bps > 10_000`
+    pub fn set_stake_config(e: Env, config: StakeConfig) {
+        stake::set_stake_config(&e, config);
+    }
+
+    /// Return the current staking configuration.
+    pub fn get_stake_config(e: Env) -> StakeConfig {
+        stake::get_stake_config(&e)
+    }
+
+    /// Return the discounted fee for `user`, taking their stake priority
+    /// into account.
+    ///
+    /// Users with active stakes receive a percentage discount based on
+    /// their priority score. Users without stakes see the raw fee.
+    pub fn get_discounted_fee(e: Env, user: Address) -> i128 {
+        stake::get_discounted_fee(&e, user)
+    }
 }
 
 #[cfg(test)]
 mod security_test;
+#[cfg(test)]
+mod stake_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]

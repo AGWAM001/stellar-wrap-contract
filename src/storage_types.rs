@@ -85,6 +85,32 @@ pub struct FeeParams {
     pub max_fee: i128,
 }
 
+/// Records a user's staking position for wrap priority.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StakeRecord {
+    /// Amount currently staked by the user.
+    pub amount: i128,
+    /// Ledger timestamp when the user first staked.
+    pub staked_at: u64,
+    /// Ledger timestamp when unstake was initiated; 0 means not unstaking.
+    pub unstaking_at: u64,
+}
+
+/// Admin-configurable parameters for the staking mechanism.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StakeConfig {
+    /// Minimum amount a user must stake to participate.
+    pub min_stake: i128,
+    /// Cooldown period (in seconds) before a user can withdraw after unstaking.
+    pub cooldown_seconds: u64,
+    /// Fee discount earned per unit of `min_stake` above the minimum, in basis points.
+    pub priority_multiplier_bps: u32,
+    /// Maximum fee discount from staking, in basis points (e.g. 5000 = 50%).
+    pub max_priority_bps: u32,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -124,4 +150,12 @@ pub enum DataKey {
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
+
+    // Staking mechanism keys
+    /// Stores a user's staking record (persistent).
+    Stake(Address),
+    /// Admin-configurable staking parameters (instance-level).
+    StakeConfig,
+    /// Total amount staked across all users (instance-level).
+    TotalStaked,
 }

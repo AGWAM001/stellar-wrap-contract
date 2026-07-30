@@ -18,4 +18,12 @@ pub enum ContractError {
     Paused = 12,
     ArithmeticOverflow = 13,
     InvalidFeeParams = 14,
+    // Staking errors
+    StakeTooLow = 15,
+    StakeNotFound = 16,
+    StakeCooldownActive = 17,
+    StakeNotUnstaking = 18,
+    StakeCooldownNotElapsed = 19,
+    InvalidStakeConfig = 20,
+    StakeArithmeticOverflow = 21,
 }
