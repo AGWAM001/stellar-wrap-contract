@@ -1417,6 +1417,137 @@ fn test_burn_wrap_multiple_users_independent() {
     assert!(client.get_wrap(&user_b, &period).is_some());
 }
 
+// ============================================================================
+// get_all_wraps_for_user tests
+// ============================================================================
+
+#[test]
+fn test_get_all_wraps_for_user_returns_all_wraps() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[30u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+    let hash3 = BytesN::from_array(&env, &[30u8; 32]);
+
+    let sig1 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202401, &archetype, &hash1,
+    );
+    let sig2 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202402, &archetype, &hash2,
+    );
+    let sig3 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202403, &archetype, &hash3,
+    );
+
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &1u32, &sig1);
+    client.mint_wrap(&user, &202402, &archetype, &hash2, &1u32, &sig2);
+    client.mint_wrap(&user, &202403, &archetype, &hash3, &1u32, &sig3);
+
+    let all_wraps = client.get_all_wraps_for_user(&user);
+    assert_eq!(all_wraps.len(), 3);
+
+    let periods: Vec<u64> = all_wraps.iter().map(|w| w.period).collect();
+    assert!(periods.contains(&202401));
+    assert!(periods.contains(&202402));
+    assert!(periods.contains(&202403));
+}
+
+#[test]
+fn test_get_all_wraps_for_user_empty_for_no_wraps() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let user = Address::generate(&env);
+    let all_wraps = client.get_all_wraps_for_user(&user);
+    assert_eq!(all_wraps.len(), 0);
+}
+
+#[test]
+fn test_get_all_wraps_for_user_single_wrap() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[31u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("solo");
+    let period = 202401u64;
+
+    let sig = sign_payload(
+        &env, &signing_key, &contract_id, &user, period, &archetype, &hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash, &1u32, &sig);
+
+    let all_wraps = client.get_all_wraps_for_user(&user);
+    assert_eq!(all_wraps.len(), 1);
+    let wrap = all_wraps.get(0).unwrap();
+    assert_eq!(wrap.period, period);
+    assert_eq!(wrap.data_hash, hash);
+    assert_eq!(wrap.archetype, archetype);
+}
+
+#[test]
+fn test_get_all_wraps_for_user_independent_per_user() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[32u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+
+    let sig_a1 = sign_payload(
+        &env, &signing_key, &contract_id, &user_a, 202401, &archetype, &hash,
+    );
+    let sig_a2 = sign_payload(
+        &env, &signing_key, &contract_id, &user_a, 202402, &archetype, &hash,
+    );
+    let sig_b1 = sign_payload(
+        &env, &signing_key, &contract_id, &user_b, 202401, &archetype, &hash,
+    );
+
+    client.mint_wrap(&user_a, &202401, &archetype, &hash, &1u32, &sig_a1);
+    client.mint_wrap(&user_a, &202402, &archetype, &hash, &1u32, &sig_a2);
+    client.mint_wrap(&user_b, &202401, &archetype, &hash, &1u32, &sig_b1);
+
+    let wraps_a = client.get_all_wraps_for_user(&user_a);
+    let wraps_b = client.get_all_wraps_for_user(&user_b);
+
+    assert_eq!(wraps_a.len(), 2);
+    assert_eq!(wraps_b.len(), 1);
+}
+
 /// Comprehensive unit tests for verify_data function.
 /// Tests the core requirement: verify_data must return true for correct data payloads
 /// that match the hash stored during minting.

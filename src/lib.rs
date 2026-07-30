@@ -206,6 +206,15 @@ impl StellarWrapContract {
         queries::get_wraps(e, user, start, limit)
     }
 
+    /// Returns every wrap record owned by `user` in a single call.
+    ///
+    /// This is a convenience wrapper around [`get_wraps`] that fetches all
+    /// records without pagination. For users with many wraps, prefer the
+    /// paginated [`get_wraps`] to stay within Soroban resource limits.
+    pub fn get_all_wraps_for_user(e: Env, user: Address) -> soroban_sdk::Vec<WrapRecord> {
+        queries::get_all_wraps_for_user(e, user)
+    }
+
     /// Extend the TTL (time-to-live) for all persistent storage entries belonging to a user.
     ///
     /// Soroban persistent storage entries expire after their TTL lapses. This function lets
