@@ -19,7 +19,5 @@ pub(crate) fn set_alias_hash(e: Env, user: Address, alias_hash: BytesN<32>) {
 
 /// Return the alias hash for `user`, or `None` if not set.
 pub(crate) fn get_alias_hash(e: Env, user: Address) -> Option<BytesN<32>> {
-    e.storage()
-        .persistent()
-        .get(&DataKey::AliasHash(user))
+    e.storage().persistent().get(&DataKey::AliasHash(user))
 }

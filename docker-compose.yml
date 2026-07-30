@@ -1,0 +1,70 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stellar Local Development Network
+# ─────────────────────────────────────────────────────────────────────────────
+# Spins up a complete, self-contained Stellar blockchain environment for local
+# smart contract testing using the official stellar/quickstart image.
+#
+# Services:
+#   stellar-core   – Node server (single self-validator, standalone network)
+#   stellar-rpc    – Soroban RPC server for contract deployment & invocation
+#   horizon        – REST API server (included inside the quickstart image)
+#   friendbot      – Testnet faucet (included automatically)
+#
+# Usage:
+#   docker compose up -d                     # Start the local network
+#   docker compose logs -f                   # Monitor logs
+#   docker compose down -v                   # Stop & remove volumes
+#
+# The quickstart image runs all Stellar processes inside a single container
+# via supervisord.  The docker-compose.yml wraps it with standard volume
+# management and port mappings.
+#
+# Network passphrase: "Standalone Network ; February 2017"
+# RPC endpoint:       http://localhost:8000/rpc
+# Horizon endpoint:   http://localhost:8000
+#
+# Add the network to the Stellar CLI:
+#   stellar network add local \
+#     --rpc-url "http://localhost:8000/rpc" \
+#     --network-passphrase "Standalone Network ; February 2017"
+#
+# Generate & fund a test identity (friendbot is auto-enabled):
+#   stellar keys generate alice
+#   curl -X POST "http://localhost:8000/friendbot?addr=$(stellar keys address alice)"
+#
+# Deploy the contract:
+#   stellar contract deploy \
+#     --wasm target/wasm32-unknown-unknown/release/stellar_wrap_contract.wasm \
+#     --source-account alice \
+#     --network local
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  stellar:
+    image: stellar/quickstart:testing
+    container_name: stellar-wrap-local
+    restart: unless-stopped
+    ports:
+      # HTTP / Horizon / RPC / Friendbot all share port 8000
+      - "8000:8000"
+    volumes:
+      # Persistent state: core database, history archives, etc.
+      - stellar-data:/opt/stellar
+    environment:
+      # These are consumed by the quickstart entrypoint scripts.
+      # The `--local` flag creates an isolated single-node network with
+      # 1-second ledger close times (no external connectivity needed).
+      #
+      # `--enable-stellar-rpc` activates the Soroban RPC server so that
+      # `stellar contract deploy` / `invoke` work out of the box.
+      STELLAR_NETWORK: local
+      STELLAR_RPC_ENABLED: "true"
+    command: >
+      --local
+      --enable-stellar-rpc
+
+volumes:
+  stellar-data:
+    name: stellar-wrap-local-data
