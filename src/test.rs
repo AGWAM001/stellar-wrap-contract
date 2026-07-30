@@ -2529,3 +2529,73 @@ fn test_set_alias_hash_requires_auth() {
     let dummy_wasm_hash = BytesN::from_array(&env, &[0xBBu8; 32]);
     client.upgrade(&dummy_wasm_hash);
 }
+
+
+// ─── Issue: balance_of increments after successful mint_wrap ─────────────────
+
+/// Verifies that `balance_of` starts at 0 for a new user and increments by 1
+/// for each successful `mint_wrap` call.
+#[test]
+fn test_balance_of_increments_after_mint_wrap() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[55u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[11u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[22u8; 32]);
+    let hash3 = BytesN::from_array(&env, &[33u8; 32]);
+
+    // Before any mint: balance must be 0.
+    assert_eq!(client.balance_of(&user), 0);
+
+    // First mint → balance becomes 1.
+    let sig1 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202401,
+        &archetype,
+        &hash1,
+        CURRENT_PAYLOAD_VERSION,
+    );
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
+    assert_eq!(client.balance_of(&user), 1);
+
+    // Second mint (different period) → balance becomes 2.
+    let sig2 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202402,
+        &archetype,
+        &hash2,
+        CURRENT_PAYLOAD_VERSION,
+    );
+    client.mint_wrap(&user, &202402, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
+    assert_eq!(client.balance_of(&user), 2);
+
+    // Third mint (another period) → balance becomes 3.
+    let sig3 = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202403,
+        &archetype,
+        &hash3,
+        CURRENT_PAYLOAD_VERSION,
+    );
+    client.mint_wrap(&user, &202403, &archetype, &hash3, &CURRENT_PAYLOAD_VERSION, &sig3);
+    assert_eq!(client.balance_of(&user), 3);
+}
