@@ -1,12 +1,10 @@
-// New tests for storage accounting and fee computation
-// This is a minimal compile-time test scaffold; expand with realistic scenarios.
-#![cfg(test)]
-extern crate std;
 use soroban_sdk::Env;
+use stellar_wrap_contract::{StellarWrapContract, StellarWrapContractClient};
 
 #[test]
 fn storage_accounting_compile_test() {
-    // basic smoke test to ensure API wiring compiles
     let e = Env::default();
-    let _ = super::storage_accounting::get_storage_bytes(&e);
+    let contract_id = e.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&e, &contract_id);
+    let _ = client.storage_bytes();
 }
