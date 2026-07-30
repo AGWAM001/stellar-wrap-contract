@@ -258,6 +258,7 @@ with the wrong `payload_version`) produces a different message, and
 
 ---
 
+
 ## Error reference
 
 | Code | Name | Triggered when |
