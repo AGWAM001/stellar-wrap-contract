@@ -14,6 +14,9 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, Symbol,
 };
 
+/// Test 1: Replay Attack Simulation
+/// Ensures that a valid signature cannot be reused for the same period
+
 fn sign_payload(
     env: &Env,
     signer: &SigningKey,

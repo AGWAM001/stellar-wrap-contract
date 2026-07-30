@@ -66,7 +66,7 @@ pub(crate) fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: Bytes
     }
 
     let total_revoked_key = DataKey::TotalRevoked;
-    let current_total: u64 = e.storage().instance().get(&total_revoked_key).unwrap_or(0);
+    let current_total: u64 = e.storage().temporary().get(&total_revoked_key).unwrap_or(0);
     let next_total = current_total + 1;
     e.storage().instance().set(&total_revoked_key, &next_total);
     e.events()
