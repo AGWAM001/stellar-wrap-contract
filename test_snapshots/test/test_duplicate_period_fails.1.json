@@ -29,7 +29,10 @@
                   "bytes": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
                 },
                 {
-                  "bytes": "c0e2450c8c4723d2568f8b928f1a78ea556737c7f3987d193f743e7d66084652df4f02f1c7cde100ee01e80b8123f31f57ee95dbf17a59fc691a6aad35581f02"
+                  "u32": 1
+                },
+                {
+                  "bytes": "6537b7b668d95e9c5bce8b38ec11d3b04237c8e1138878459b9ea7897c3319ccd2f1a57ccdf3a740e6f17d62e34cc34283a3eea04e811c4711a8069438b3f006"
                 }
               ]
             }
@@ -87,6 +90,61 @@
               "key": {
                 "vec": [
                   {
+                    "symbol": "TotalWrapCount"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u32": 1
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6307200
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "UserPeriods"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "vec": [
+                  {
+                    "u64": "202401"
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6307200
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
                     "symbol": "Wrap"
                   },
                   {
@@ -114,6 +172,31 @@
                     },
                     "val": {
                       "bytes": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "fsm"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "state"
+                          },
+                          "val": {
+                            "u32": 3
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "updated_at"
+                          },
+                          "val": {
+                            "u64": "0"
+                          }
+                        }
+                      ]
                     }
                   },
                   {
@@ -204,6 +287,18 @@
                       },
                       "val": {
                         "bytes": "ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7c"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "StorageBytes"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "208"
                       }
                     }
                   ]
