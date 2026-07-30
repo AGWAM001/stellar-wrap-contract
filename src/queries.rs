@@ -27,14 +27,11 @@ pub(crate) fn total_wrap_count(e: Env) -> u32 {
 
 pub(crate) fn verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool {
     let wrap: Option<WrapRecord> = e.storage().persistent().get(&DataKey::Wrap(user, period));
-    match wrap {
-        Some(record) => {
-            let computed_hash = e.crypto().sha256(&data);
-            let computed_hash = BytesN::from_array(&e, &computed_hash.to_array());
-            record.data_hash == computed_hash
-        }
-        None => false,
-    }
+    wrap.map_or(false, |record| {
+        let computed_hash = e.crypto().sha256(&data);
+        let computed_hash = BytesN::from_array(&e, &computed_hash.to_array());
+        record.data_hash == computed_hash
+    })
 }
 
 pub(crate) fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
