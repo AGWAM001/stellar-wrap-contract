@@ -1,5 +1,11 @@
 #![no_std]
 
+// The `arbitrary` derive used by soroban-sdk's `testutils` fuzzing support
+// expands to `std::`-qualified paths, so `std` must be in scope for test builds
+// of this otherwise `no_std` crate.
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
