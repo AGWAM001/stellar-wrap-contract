@@ -111,6 +111,11 @@ pub(crate) fn get_wraps(
     results
 }
 
+pub(crate) fn get_all_wraps_for_user(e: Env, user: Address) -> soroban_sdk::Vec<WrapRecord> {
+    // Fetch all wraps by using the maximum possible range.
+    get_wraps(e, user, 0, u32::MAX)
+}
+
 pub(crate) fn health(e: Env) -> ContractHealth {
     let has_admin = e.storage().instance().has(&DataKey::Admin);
     let has_signing_key = e.storage().instance().has(&DataKey::AdminPubKey);
