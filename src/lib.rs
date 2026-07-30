@@ -14,22 +14,26 @@
 
 #![no_std]
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol,
+};
 
 mod admin;
 mod alias;
 mod errors;
 mod mint;
+mod oracle;
 mod queries;
 mod revoke;
-mod signature;
-mod storage_types;
+pub mod signature;
 mod storage_accounting;
+mod storage_types;
 
-pub use errors::ContractError;
+pub use mint::CURRENT_PAYLOAD_VERSION;
+pub use oracle::DataHashOracle;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
 pub use token::TokenInterface;
 
@@ -105,15 +109,18 @@ impl StellarWrapContract {
         payload_version: u32,
         signature: BytesN<64>,
     ) {
-        mint::mint_wrap(e, user, period, archetype, data_hash, payload_version, signature);
+        mint::mint_wrap(
+            e,
+            user,
+            period,
+            archetype,
+            data_hash,
+            payload_version,
+            signature,
+        );
     }
 
-    pub fn transition_wrap_state(
-        e: Env,
-        user: Address,
-        period: u64,
-        next_state: WrapState,
-    ) {
+    pub fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
         mint::transition_wrap_state(e, user, period, next_state);
     }
 
@@ -136,11 +143,24 @@ impl StellarWrapContract {
         queries::verify_data(e, user, period, data)
     }
 
+    /// Asks an external oracle contract whether `data_hash` is recognized.
+    ///
+    /// The oracle must expose `verify_data_hash(BytesN<32>) -> bool`.
+    /// Oracle invocation and ABI errors propagate to the caller.
+    pub fn verify_with_oracle(e: Env, oracle: Address, data_hash: BytesN<32>) -> bool {
+        oracle::verify_data_hash(&e, &oracle, &data_hash)
+    }
+
     pub fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
         queries::get_latest_wrap(e, user)
     }
 
-    pub fn get_wraps(e: Env, user: Address, start: u32, limit: u32) -> soroban_sdk::Vec<WrapRecord> {
+    pub fn get_wraps(
+        e: Env,
+        user: Address,
+        start: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<WrapRecord> {
         queries::get_wraps(e, user, start, limit)
     }
 
@@ -268,6 +288,10 @@ impl StellarWrapContract {
         revoke::revoke_wrap(e, user, period, reason_hash);
     }
 
+    pub fn burn_wrap(e: Env, user: Address, period: u64) {
+        burn::burn_wrap(e, user, period);
+    }
+
     pub fn total_revoked(e: Env) -> u64 {
         queries::total_revoked(e)
     }
@@ -315,6 +339,8 @@ impl token::TokenInterface for StellarWrapContract {
     }
 }
 
+#[cfg(test)]
+mod oracle_test;
 #[cfg(test)]
 mod security_test;
 #[cfg(test)]
