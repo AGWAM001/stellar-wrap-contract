@@ -18,19 +18,38 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     e.storage()
         .instance()
         .set(&DataKey::AdminPubKey, &admin_pubkey);
+    e.events().publish((symbol_short!("init"),), admin);
 }
 
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
-    read_admin(&e).require_auth();
+    let current_admin = read_admin(&e);
+    current_admin.require_auth();
     e.storage().instance().set(&DataKey::Admin, &new_admin);
     e.storage().instance().remove(&DataKey::PendingAdmin);
+
+    e.events().publish(
+        (symbol_short!("admin"), symbol_short!("updated")),
+        (current_admin, new_admin),
+    );
 }
 
-pub(crate) fn unpause(e: Env) {
+pub(crate) fn set_pause(e: Env, paused: bool) {
     read_admin(&e).require_auth();
-    e.storage().instance().set(&DataKey::Paused, &false);
-    e.events()
-        .publish((symbol_short!("pause"), symbol_short!("status")), false);
+    e.storage().instance().set(&DataKey::Paused, &paused);
+    e.events().publish((symbol_short!("pause"),), paused);
+}
+
+pub(crate) fn is_paused(e: &Env) -> bool {
+    e.storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+}
+
+pub(crate) fn require_not_paused(e: &Env) {
+    if is_paused(e) {
+        panic_with_error!(e, ContractError::Paused);
+    }
 }
 
 /// Marks a storage migration as applied. A version can only be applied once and
@@ -85,7 +104,9 @@ pub(crate) fn propose_admin(e: Env, new_admin: Address) {
         panic_with_error!(e, ContractError::AdminTransferProposalExists);
     }
 
-    e.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+    e.storage()
+        .instance()
+        .set(&DataKey::PendingAdmin, &new_admin);
 }
 
 pub(crate) fn accept_admin(e: Env) {
@@ -148,5 +169,3 @@ pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
     current_admin.require_auth();
     e.storage().instance().set(&DataKey::Symbol, &symbol);
 }
-
-
