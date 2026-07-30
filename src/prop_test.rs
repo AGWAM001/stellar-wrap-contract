@@ -5,14 +5,12 @@ extern crate std;
 
 use super::*;
 
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signer, SigningKey};
 use proptest::prelude::*;
-use soroban_sdk::{
-    testutils::Address as _,
-    xdr::ToXdr,
-    Address, Bytes, BytesN, Env, Symbol,
-};
+use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, Symbol};
+
 use crate::mint::CURRENT_PAYLOAD_VERSION;
+use crate::signature::construct_mint_payload;
 
 // ── Shared test constants ────────────────────────────────────────────────────
 
@@ -71,8 +69,14 @@ fn sign_mint(
     data_hash: &BytesN<32>,
     payload_version: u32,
 ) -> BytesN<64> {
-    let payload = crate::signature::construct_mint_payload(
-        env, contract, user, period, archetype, data_hash, payload_version,
+    let payload = construct_mint_payload(
+        env,
+        contract,
+        user,
+        period,
+        archetype,
+        data_hash,
+        payload_version,
     );
 
     let mut buf = [0u8; 512];

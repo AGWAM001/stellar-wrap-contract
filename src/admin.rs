@@ -1,5 +1,6 @@
 use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
+use crate::mint::TTL_TEMP;
 use crate::{ContractError, DataKey};
 
 /// Reads the stored admin or panics with `NotInitialized`.
@@ -10,7 +11,6 @@ pub(crate) fn read_admin(e: &Env) -> Address {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
 
-#[allow(deprecated)]
 pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     if e.storage().instance().has(&DataKey::Admin) {
         panic_with_error!(e, ContractError::AlreadyInitialized);
@@ -22,7 +22,6 @@ pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     e.events().publish((symbol_short!("init"),), admin);
 }
 
-#[allow(deprecated)]
 pub(crate) fn update_admin(e: Env, new_admin: Address) {
     let current_admin = read_admin(&e);
     current_admin.require_auth();
@@ -30,12 +29,15 @@ pub(crate) fn update_admin(e: Env, new_admin: Address) {
     e.storage().instance().remove(&DataKey::PendingAdmin);
 
     e.events().publish(
-        (symbol_short!("admin"), symbol_short!("updated")),
+        (
+            symbol_short!("v1"),
+            symbol_short!("admin"),
+            symbol_short!("updated"),
+        ),
         (current_admin, new_admin),
     );
 }
 
-#[allow(deprecated)]
 pub(crate) fn set_pause(e: Env, paused: bool) {
     read_admin(&e).require_auth();
     e.storage().instance().set(&DataKey::Paused, &paused);
@@ -78,7 +80,6 @@ pub(crate) fn migration_version(e: &Env) -> u32 {
         .unwrap_or(0)
 }
 
-#[allow(deprecated)]
 pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
     let current_admin: Address = e
         .storage()
@@ -87,9 +88,21 @@ pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    // Emit audit event with the requested WASM hash before performing the upgrade
+
+    // Bump the contract version to track upgrade history
+    let next_version: u32 = e
+        .storage()
+        .instance()
+        .get(&DataKey::ContractVersion)
+        .unwrap_or(0)
+        + 1;
+    e.storage()
+        .instance()
+        .set(&DataKey::ContractVersion, &next_version);
+
+    // Emit audit event with the requested WASM hash and new version
     e.events()
-        .publish((symbol_short!("upgrade"),), new_wasm_hash.clone());
+        .publish((symbol_short!("upgrade"), next_version), new_wasm_hash.clone());
 
     // Update the contract WASM with the provided hash
     e.deployer().update_current_contract_wasm(new_wasm_hash);
@@ -160,7 +173,10 @@ pub(crate) fn set_name(e: Env, name: soroban_sdk::String) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    e.storage().instance().set(&DataKey::Name, &name);
+    e.storage().temporary().set(&DataKey::Name, &name);
+    e.storage()
+        .temporary()
+        .extend_ttl(&DataKey::Name, TTL_TEMP, TTL_TEMP);
 }
 
 pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
@@ -171,5 +187,8 @@ pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    e.storage().instance().set(&DataKey::Symbol, &symbol);
+    e.storage().temporary().set(&DataKey::Symbol, &symbol);
+    e.storage()
+        .temporary()
+        .extend_ttl(&DataKey::Symbol, TTL_TEMP, TTL_TEMP);
 }

@@ -1,6 +1,6 @@
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
-use soroban_sdk::{contracttype, Address, BytesN, Symbol};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -58,7 +58,21 @@ pub struct WrapRecord {
     pub archetype: Symbol,
     pub period: u64, // Standardized to u64 for better indexing/sorting
     pub fsm: WrapLifecycleFSM,
+    pub description: Option<String>,
+    pub image_url: Option<String>,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchWrapItem {
+    pub user: Address,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub payload_version: u32,
+    pub signature: BytesN<64>,
+}
+
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,6 +100,17 @@ pub struct FeeParams {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferFeeConfig {
+    /// Amount of `token` charged to the sender for each successful transfer.
+    pub amount: i128,
+    /// Address that receives transfer fees.
+    pub recipient: Address,
+    /// Soroban token contract used to collect fees.
+    pub token: Address,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     /// Stores the address of the admin.
@@ -100,6 +125,13 @@ pub enum DataKey {
     WrapCount(Address),
     /// Stores the latest period minted for a specific user.
     LatestPeriod(Address),
+    /// Stores the periods currently owned by a user so transfers can update
+    /// `LatestPeriod` without scanning contract storage.
+    WrapPeriods(Address),
+    /// Stores the admin-controlled transfer fee configuration.
+    TransferFee,
+    /// Temporary reentrancy guard for transfer calls.
+    TransferGuard,
     /// Stores the highest storage migration version already applied.
     MigrationVersion,
     /// Stores a list of periods a user has minted wraps for.
@@ -124,4 +156,36 @@ pub enum DataKey {
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
+    // DAO Governance Admin Proposal keys:
+    /// Total number of governance proposals created (u64)
+    AdminProposalCount,
+    /// Individual governance admin proposal record keyed by proposal ID
+    AdminProposal(u64),
+    /// Vote record for a voter on a proposal: (proposal_id, voter)
+    AdminProposalVote(u64, Address),
+    /// Tracks the contract version number, incremented on each `upgrade`.
+    ContractVersion,
 }
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ProposalStatus {
+    Active = 1,
+    Executed = 2,
+    Defeated = 3,
+    Cancelled = 4,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub proposed_admin: Address,
+    pub votes_for: u64,
+    pub votes_against: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub status: ProposalStatus,
+}
+
