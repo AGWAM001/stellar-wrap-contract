@@ -5,8 +5,12 @@ edition = "2021"
 resolver = "2"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["lib", "cdylib"]
 path = "src/lib.rs"
+
+[features]
+# Enables SorobanArbitrary / testutils codegen required by cargo-fuzz targets.
+testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
 soroban-sdk = "=27.0.3"
