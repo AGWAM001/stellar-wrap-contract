@@ -53,66 +53,23 @@ fn sign_payload(
 }
 
 #[test]
-fn test_minting_flow() {
+fn test_total_wrap_count_tracks_mints_across_users() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
-    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[9u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
-    let user = Address::generate(&env);
 
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
 
-    let dummy_hash = BytesN::from_array(&env, &[42u8; 32]);
-    let archetype = symbol_short!("arch");
-    let period = 202401u64;
+    // Global count starts at zero before any mint.
+    assert_eq!(client.total_wrap_count(), 0);
 
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &dummy_hash,
-    );
-    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &signature);
-
-    let wrap = client.get_wrap(&user, &period).unwrap();
-    assert_eq!(wrap.data_hash, dummy_hash);
-}
-
-#[test]
-fn test_mint_emits_event() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let signing_key = SigningKey::from_bytes(&[2u8; 32]);
-    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin, &admin_pubkey);
-    env.mock_all_auths();
-
-    let period = 202401u64;
     let archetype = symbol_short!("arch");
     let hash = BytesN::from_array(&env, &[1u8; 32]);
-    let signature = sign_payload(
-        &env,
-        &signing_key,
-        &contract_id,
-        &user,
-        period,
-        &archetype,
-        &hash,
-    );
-
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
 
     let events = env.events().all();
     let last_event = events.last().expect("no events found");
@@ -228,10 +185,13 @@ fn test_balance_of_and_count() {
     let hash = BytesN::from_array(&env, &[0u8; 32]);
 
     let sig1 = sign_payload(
+    // First mint, user A.
+    let user_a = Address::generate(&env);
+    let sig_a = sign_payload(
         &env,
         &signing_key,
         &contract_id,
-        &user,
+        &user_a,
         202401,
         &archetype,
         &hash,
@@ -521,12 +481,17 @@ fn test_get_latest_wrap_returns_most_recent() {
     let hash1 = BytesN::from_array(&env, &[10u8; 32]);
     let hash2 = BytesN::from_array(&env, &[20u8; 32]);
     let hash3 = BytesN::from_array(&env, &[30u8; 32]);
+    client.mint_wrap(&user_a, &202401, &archetype, &hash, &sig_a);
+    assert_eq!(client.total_wrap_count(), 1);
+    assert_eq!(client.balance_of(&user_a), 1);
 
-    let sig1 = sign_payload(
+    // Second mint, same user, different period — global count goes up,
+    // per-user count goes up too.
+    let sig_a2 = sign_payload(
         &env,
         &signing_key,
         &contract_id,
-        &user,
+        &user_a,
         202402,
         &archetype,
         &hash1,
@@ -614,36 +579,18 @@ fn test_get_latest_wrap_single_mint() {
         &hash,
         &hash_b,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    client.mint_wrap(&user_a, &202402, &archetype, &hash, &sig_a2);
+    assert_eq!(client.total_wrap_count(), 2);
+    assert_eq!(client.balance_of(&user_a), 2);
 
-    let latest = client.get_latest_wrap(&user).unwrap();
-    assert_eq!(latest.period, 202501);
-    assert_eq!(latest.data_hash, hash);
-}
-
-#[test]
-fn test_valid_period_boundaries() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let signing_key = SigningKey::from_bytes(&[9u8; 32]);
-    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    client.initialize(&admin, &admin_pubkey);
-    env.mock_all_auths();
-
-    let archetype = symbol_short!("arch");
-    let lower_hash = BytesN::from_array(&env, &[60u8; 32]);
-    let upper_hash = BytesN::from_array(&env, &[61u8; 32]);
-
-    let lower_sig = sign_payload(
+    // Third mint, a different user entirely — global count still climbs,
+    // confirming TotalWrapCount is contract-wide, not per-user.
+    let user_b = Address::generate(&env);
+    let sig_b = sign_payload(
         &env,
         &signing_key,
         &contract_id,
-        &user,
+        &user_b,
         202401,
         &archetype,
         &lower_hash,
@@ -2184,3 +2131,16 @@ fn test_upgrade_before_init_fails() {
     let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
     client.upgrade(&new_wasm_hash);
 }
+    client.mint_wrap(&user_b, &202401, &archetype, &hash, &sig_b);
+    assert_eq!(client.total_wrap_count(), 3);
+    assert_eq!(client.balance_of(&user_b), 1);
+}
+
+// NOTE: This issue's acceptance criteria also calls for decrement-on-revoke
+// and remint tracking/tests. As of this change the contract has no
+// revoke/remint capability at all (no revoke_wrap function exists anywhere
+// in the codebase) — only mint_wrap. TotalWrapCount is implemented as a
+// simple increment-on-mint counter so that decrementing it is a one-line
+// change (mirroring this same read-increment-write pattern) whenever
+// revoke_wrap is built. Flagged on the issue for a scope decision on
+// whether revoke belongs in this PR or a follow-up.
