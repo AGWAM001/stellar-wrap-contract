@@ -28,7 +28,11 @@ pub(crate) fn update_admin(e: Env, new_admin: Address) {
     e.storage().instance().remove(&DataKey::PendingAdmin);
 
     e.events().publish(
-        (symbol_short!("admin"), symbol_short!("updated")),
+        (
+            symbol_short!("v1"),
+            symbol_short!("admin"),
+            symbol_short!("updated"),
+        ),
         (current_admin, new_admin),
     );
 }
