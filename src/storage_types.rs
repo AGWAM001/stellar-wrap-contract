@@ -1,6 +1,6 @@
 #[cfg(any(test, feature = "testutils"))]
 extern crate std;
-use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, String, Symbol};
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -101,6 +101,33 @@ pub struct FeeParams {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutboundBridgeRequest {
+    pub nonce: u64,
+    pub sender: Address,
+    pub destination_chain: u32,
+    pub recipient_address: Bytes,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InboundBridgeRecord {
+    pub source_chain: u32,
+    pub source_nonce: u64,
+    pub recipient: Address,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransferFeeConfig {
     /// Amount of `token` charged to the sender for each successful transfer.
     pub amount: i128,
@@ -108,6 +135,7 @@ pub struct TransferFeeConfig {
     pub recipient: Address,
     /// Soroban token contract used to collect fees.
     pub token: Address,
+}
 }
 
 #[contracttype]
@@ -159,6 +187,19 @@ pub enum DataKey {
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
+    // Token Bridge storage keys:
+    /// Address authorized as the cross-chain token bridge relayer.
+    BridgeRelayer,
+    /// Status (enabled/disabled) of a supported target/source chain ID.
+    BridgeChainStatus(u32),
+    /// Current outbound bridge request sequence counter.
+    OutboundBridgeNonce,
+    /// Outbound cross-chain wrap request keyed by outbound nonce.
+    OutboundBridgeRequest(u64),
+    /// Inbound cross-chain wrap nonce processing status keyed by (source_chain, source_nonce).
+    InboundBridgeProcessed(u32, u64),
+    /// Inbound cross-chain wrap record keyed by (source_chain, source_nonce).
+    InboundBridgeRecord(u32, u64),
     // DAO Governance Admin Proposal keys:
     /// Total number of governance proposals created (u64)
     AdminProposalCount,
@@ -191,4 +232,3 @@ pub struct AdminProposal {
     pub end_time: u64,
     pub status: ProposalStatus,
 }
-

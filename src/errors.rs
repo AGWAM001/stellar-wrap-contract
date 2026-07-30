@@ -38,5 +38,11 @@ pub enum ContractError {
     ProposalDefeated = 30,
     InvalidProposalDuration = 31,
     UserOptedOut = 32,
+    // Bridge errors
+    BridgeNotInitialized = 33,
+    InvalidChain = 34,
+    ChainDisabled = 35,
+    NonceAlreadyProcessed = 36,
+    InvalidBridgePayload = 37,
 }
 

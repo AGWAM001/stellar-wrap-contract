@@ -15,10 +15,13 @@ The contract is split into focused modules:
 - `src/lib.rs`: contract type and module wiring
 - `src/admin.rs`: initialization and admin updates
 - `src/mint.rs`: period validation, signature verification, wrap minting, event emission
+- `src/bridge.rs`: generic token bridge interface for cross-chain wrap interactions
 - `src/queries.rs`: read-only queries and metadata
 - `src/errors.rs`: contract error codes
 - `src/storage_types.rs`: storage keys and persisted record types
 - `src/test_utils.rs`: shared test-only helpers (e.g. payload signing)
+
+For detailed bridge architecture and cross-chain workflow, see [docs/bridge-architecture.md](docs/bridge-architecture.md).
 
 ## Data model
 
