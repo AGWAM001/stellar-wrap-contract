@@ -1,11 +1,10 @@
-use soroban_sdk::{
-    panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol,
-};
+use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env, Symbol};
 
 use crate::storage_types::{WrapLifecycleFSM, WrapState};
-use crate::{ContractError, DataKey, WrapRecord};
+use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
+pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 
 fn validate_period(e: &Env, period: u64) {
     let year = period / 100;
@@ -16,6 +15,12 @@ fn validate_period(e: &Env, period: u64) {
     }
 }
 
+fn validate_payload_version(e: &Env, version: u32) {
+    if version != CURRENT_PAYLOAD_VERSION {
+        panic_with_error!(e, ContractError::InvalidSignature);
+    }
+}
+
 fn get_admin_pubkey(e: &Env) -> BytesN<32> {
     e.storage()
         .instance()
@@ -23,25 +28,7 @@ fn get_admin_pubkey(e: &Env) -> BytesN<32> {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
 
-pub(crate) const MINT_SIGNATURE_PAYLOAD_VERSION: u8 = 1;
 
-fn build_payload(
-    e: &Env,
-    contract: &Address,
-    user: &Address,
-    period: u64,
-    archetype: &Symbol,
-    data_hash: &BytesN<32>,
-) -> Bytes {
-    let mut payload = Bytes::new(e);
-    payload.append(&Bytes::from_array(e, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
-    payload.append(&contract.to_xdr(e));
-    payload.append(&user.clone().to_xdr(e));
-    payload.append(&period.to_xdr(e));
-    payload.append(&archetype.clone().to_xdr(e));
-    payload.append(&data_hash.clone().to_xdr(e));
-    payload
-}
 
 pub(crate) fn mint_wrap(
     e: Env,
@@ -49,23 +36,25 @@ pub(crate) fn mint_wrap(
     period: u64,
     archetype: Symbol,
     data_hash: BytesN<32>,
+    payload_version: u32,
     signature: BytesN<64>,
 ) {
     user.require_auth();
     validate_period(&e, period);
+    validate_payload_version(&e, payload_version);
 
     let admin_pubkey = get_admin_pubkey(&e);
-    let payload = build_payload(
+    let _ = verify_mint_signature(
         &e,
+        &admin_pubkey,
         &e.current_contract_address(),
         &user,
         period,
         &archetype,
         &data_hash,
+        payload_version,
+        &signature,
     );
-
-    e.crypto()
-        .ed25519_verify(&admin_pubkey, &payload, &signature);
 
     let wrap_key = DataKey::Wrap(user.clone(), period);
     if e.storage().persistent().has(&wrap_key) {

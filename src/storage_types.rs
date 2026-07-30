@@ -78,6 +78,8 @@ pub enum DataKey {
     Admin,
     /// Stores the Ed25519 public key used to validate backend signatures.
     AdminPubKey,
+    /// Stores a proposed new admin address during two-step transfer.
+    PendingAdmin,
     /// Stores individual wrap records keyed by user and period.
     Wrap(Address, u64),
     /// Stores the total number of wraps for a specific user.
@@ -94,4 +96,12 @@ pub enum DataKey {
     TotalWrapCount,
     /// Stores the total number of wrap records revoked on-chain.
     TotalRevoked,
+    /// Stores a user-controlled 32-byte alias hash for privacy-preserving profile display.
+    AliasHash(Address),
+    /// Stores the token display name, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::name`.
+    Name,
+    /// Stores the token symbol, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::symbol`.
+    Symbol,
 }

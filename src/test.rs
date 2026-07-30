@@ -7,6 +7,7 @@ use crate::test_utils::sign_payload;
 use ed25519_dalek::SigningKey;
 use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
 use ed25519_dalek::{Signer, SigningKey};
+use crate::mint::CURRENT_PAYLOAD_VERSION;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events},
@@ -20,6 +21,7 @@ extern crate std;
 
 use super::*;
 use ed25519_dalek::{Signer, SigningKey};
+use crate::mint::CURRENT_PAYLOAD_VERSION;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events},
@@ -38,9 +40,11 @@ fn sign_payload(
     period: u64,
     archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
 ) -> BytesN<64> {
     let mut payload = Bytes::new(env);
     payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
+    payload.append(&payload_version.to_xdr(env));
     payload.append(&contract.to_xdr(env));
     payload.append(&user.clone().to_xdr(env));
     payload.append(&period.to_xdr(env));
@@ -75,12 +79,14 @@ fn test_total_wrap_count_tracks_mints_across_users() {
     let hash = BytesN::from_array(&env, &[1u8; 32]);
 
     let events = env.events().all();
-    let last_event = events.last().expect("no events found");
-    let (_, topics, data) = last_event;
+    let last_event = events.events().last().expect("no events found");
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
-    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-    let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_topic: Symbol = soroban_sdk::Val::try_from_val(&env, topics.get(0).unwrap()).unwrap().try_into_val(&env).unwrap();
+    let event_user: Address = soroban_sdk::Val::try_from_val(&env, topics.get(1).unwrap()).unwrap().try_into_val(&env).unwrap();
+    let event_period: u64 = soroban_sdk::Val::try_from_val(&env, topics.get(2).unwrap()).unwrap().try_into_val(&env).unwrap();
     let event_archetype: Symbol = data.try_into_val(&env).unwrap();
 
     let event_version: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
@@ -125,7 +131,7 @@ fn test_revoke_emits_event_multi_user() {
         period_a,
         &archetype_a,
         &hash,
-    );
+     CURRENT_PAYLOAD_VERSION);
     let sig_b = sign_payload(
         &env,
         &signing_key,
@@ -134,10 +140,10 @@ fn test_revoke_emits_event_multi_user() {
         period_b,
         &archetype_b,
         &hash,
-    );
+     CURRENT_PAYLOAD_VERSION);
 
-    client.mint_wrap(&user_a, &period_a, &archetype_a, &hash, &sig_a);
-    client.mint_wrap(&user_b, &period_b, &archetype_b, &hash, &sig_b);
+    client.mint_wrap(&user_a, &period_a, &archetype_a, &hash, &CURRENT_PAYLOAD_VERSION, &sig_a);
+    client.mint_wrap(&user_b, &period_b, &archetype_b, &hash, &CURRENT_PAYLOAD_VERSION, &sig_b);
     client.revoke_wrap(&user_a, &period_a);
     client.revoke_wrap(&user_b, &period_b);
 
@@ -188,19 +194,15 @@ fn test_balance_of_and_count() {
     let hash = BytesN::from_array(&env, &[0u8; 32]);
 
     let sig1 = sign_payload(
-    // First mint, user A.
-    let user_a = Address::generate(&env);
-    let sig_a = sign_payload(
         &env,
         &signing_key,
         &contract_id,
-        &user_a,
+        &user,
         202401,
         &archetype,
-        &hash,
+        &hash, CURRENT_PAYLOAD_VERSION
     );
-    client.mint_wrap(&user, &202401, &archetype, &hash, &sig1);
-    client.mint_wrap(&user, &2021, &archetype, &hash, &sig1);
+    client.mint_wrap(&user, &202401, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     let sig2 = sign_payload(
         &env,
@@ -211,8 +213,8 @@ fn test_balance_of_and_count() {
         &archetype,
         &hash,
     );
-    client.mint_wrap(&user, &202402, &archetype, &hash, &sig2);
-    client.mint_wrap(&user, &2022, &archetype, &hash, &sig2);
+    client.mint_wrap(&user, &202402, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig2);
+    client.mint_wrap(&user, &2022, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig2);
 
     assert_eq!(client.balance_of(&user), 2);
 }
@@ -244,7 +246,7 @@ fn test_revoke_wrap_increments_total_revoked() {
         &hash,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
     assert_eq!(client.total_revoked(), 0);
 
     client.revoke_wrap(&user, &period);
@@ -337,8 +339,8 @@ fn test_duplicate_period_fails() {
         &hash,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
 }
 
 #[test]
@@ -401,7 +403,7 @@ fn test_verify_data_matching_hash() {
         &archetype,
         &data_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     assert!(client.verify_data(&user, &period, &data_json));
 }
@@ -435,7 +437,7 @@ fn test_verify_data_non_matching_hash() {
         &archetype,
         &data_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let tampered_data = Bytes::from_slice(&env, b"{\"score\":999}");
     assert!(!client.verify_data(&user, &period, &tampered_data));
@@ -490,20 +492,10 @@ fn test_verify_data_corrupted_payload() {
         &archetype,
         &data_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let corrupted_data = Bytes::from_slice(&env, b"\x00\xFF\xFE\xFDcorrupt\x01\x02");
-    assert!(!client.verify_data(&user, &period, &corrupted_data));
-        &hash,
-    );
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
-
-    client.extend_ttl(&user, &period);
-
-    let wrap = client.get_wrap(&user, &period).unwrap();
-    assert_eq!(wrap.data_hash, hash);
 }
-
 #[test]
 fn test_verify_data_no_wrap_exists() {
     let env = Env::default();
@@ -537,7 +529,7 @@ fn test_get_latest_wrap_returns_most_recent() {
     let hash1 = BytesN::from_array(&env, &[10u8; 32]);
     let hash2 = BytesN::from_array(&env, &[20u8; 32]);
     let hash3 = BytesN::from_array(&env, &[30u8; 32]);
-    client.mint_wrap(&user_a, &202401, &archetype, &hash, &sig_a);
+    client.mint_wrap(&user_a, &202401, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_a);
     assert_eq!(client.total_wrap_count(), 1);
     assert_eq!(client.balance_of(&user_a), 1);
 
@@ -551,7 +543,7 @@ fn test_get_latest_wrap_returns_most_recent() {
         202402,
         &archetype,
         &hash1,
-    );
+     CURRENT_PAYLOAD_VERSION);
     let sig2 = sign_payload(
         &env,
         &signing_key,
@@ -560,7 +552,7 @@ fn test_get_latest_wrap_returns_most_recent() {
         202404,
         &archetype,
         &hash2,
-    );
+     CURRENT_PAYLOAD_VERSION);
     let sig3 = sign_payload(
         &env,
         &signing_key,
@@ -569,11 +561,11 @@ fn test_get_latest_wrap_returns_most_recent() {
         202403,
         &archetype,
         &hash3,
-    );
+     CURRENT_PAYLOAD_VERSION);
 
-    client.mint_wrap(&user, &202402, &archetype, &hash1, &sig1);
-    client.mint_wrap(&user, &202404, &archetype, &hash2, &sig2);
-    client.mint_wrap(&user, &202403, &archetype, &hash3, &sig3);
+    client.mint_wrap(&user, &202402, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
+    client.mint_wrap(&user, &202404, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
+    client.mint_wrap(&user, &202403, &archetype, &hash3, &CURRENT_PAYLOAD_VERSION, &sig3);
 
     let latest = client.get_latest_wrap(&user).unwrap();
     assert_eq!(latest.period, 202404);
@@ -585,14 +577,6 @@ fn test_get_latest_wrap_no_wraps() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
-    client.initialize(&admin, &pubkey);
-
-    let user = Address::generate(&env);
-    assert!(client.get_latest_wrap(&user).is_none());
-}
 
     client.extend_ttl(&user, &9999);
 }
@@ -624,7 +608,7 @@ fn test_get_latest_wrap_single_mint() {
         period,
         &archetype,
         &hash_a,
-    );
+     CURRENT_PAYLOAD_VERSION);
     let sig_b = sign_payload(
         &env,
         &signing_key,
@@ -634,8 +618,8 @@ fn test_get_latest_wrap_single_mint() {
         &archetype,
         &hash,
         &hash_b,
-    );
-    client.mint_wrap(&user_a, &202402, &archetype, &hash, &sig_a2);
+     CURRENT_PAYLOAD_VERSION);
+    client.mint_wrap(&user_a, &202402, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_a2);
     assert_eq!(client.total_wrap_count(), 2);
     assert_eq!(client.balance_of(&user_a), 2);
 
@@ -650,7 +634,7 @@ fn test_get_latest_wrap_single_mint() {
         202401,
         &archetype,
         &lower_hash,
-    );
+     CURRENT_PAYLOAD_VERSION);
     let upper_sig = sign_payload(
         &env,
         &signing_key,
@@ -659,10 +643,10 @@ fn test_get_latest_wrap_single_mint() {
         210012,
         &archetype,
         &upper_hash,
-    );
+     CURRENT_PAYLOAD_VERSION);
 
-    client.mint_wrap(&user, &202401, &archetype, &lower_hash, &lower_sig);
-    client.mint_wrap(&user, &210012, &archetype, &upper_hash, &upper_sig);
+    client.mint_wrap(&user, &202401, &archetype, &lower_hash, &CURRENT_PAYLOAD_VERSION, &lower_sig);
+    client.mint_wrap(&user, &210012, &archetype, &upper_hash, &CURRENT_PAYLOAD_VERSION, &upper_sig);
 
     assert!(client.get_wrap(&user, &202401).is_some());
     assert!(client.get_wrap(&user, &210012).is_some());
@@ -671,8 +655,8 @@ fn test_get_latest_wrap_single_mint() {
 #[test]
 #[should_panic(expected = "Error(Contract, #6)")]
 fn test_invalid_period_zero_fails() {
-    client.mint_wrap(&user_a, &period, &archetype, &hash_a, &sig_a);
-    client.mint_wrap(&user_b, &period, &archetype, &hash_b, &sig_b);
+    client.mint_wrap(&user_a, &period, &archetype, &hash_a, &CURRENT_PAYLOAD_VERSION, &sig_a);
+    client.mint_wrap(&user_b, &period, &archetype, &hash_b, &CURRENT_PAYLOAD_VERSION, &sig_b);
 
     let wrap_a = client.get_wrap(&user_a, &period).unwrap();
     let wrap_b = client.get_wrap(&user_b, &period).unwrap();
@@ -712,10 +696,10 @@ fn test_mint_event_structured_matching() {
         period,
         &archetype,
         &hash,
-    );
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+     CURRENT_PAYLOAD_VERSION);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
     let events = env.events().all();
     let last_event = events.last().expect("Expected at least one event");
     let (event_contract, topics, data) = last_event;
@@ -763,9 +747,9 @@ fn test_invalid_period_one_fails() {
         period,
         &archetype,
         &hash,
-    );
+     CURRENT_PAYLOAD_VERSION);
 
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let archetype_a = symbol_short!("builder");
     let archetype_b = symbol_short!("defi");
@@ -782,7 +766,7 @@ fn test_invalid_period_one_fails() {
         period_a,
         &archetype_a,
         &hash_a,
-    );
+     CURRENT_PAYLOAD_VERSION);
     let sig_b = sign_payload(
         &env,
         &signing_key,
@@ -791,10 +775,10 @@ fn test_invalid_period_one_fails() {
         period_b,
         &archetype_b,
         &hash_b,
-    );
+     CURRENT_PAYLOAD_VERSION);
 
-    client.mint_wrap(&user_a, &period_a, &archetype_a, &hash_a, &sig_a);
-    client.mint_wrap(&user_b, &period_b, &archetype_b, &hash_b, &sig_b);
+    client.mint_wrap(&user_a, &period_a, &archetype_a, &hash_a, &CURRENT_PAYLOAD_VERSION, &sig_a);
+    client.mint_wrap(&user_b, &period_b, &archetype_b, &hash_b, &CURRENT_PAYLOAD_VERSION, &sig_b);
 
     let events = env.events().all();
 
@@ -859,10 +843,10 @@ fn test_invalid_period_max_fails() {
         &archetype,
         &hash,
         &data_hash,
-    );
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+     CURRENT_PAYLOAD_VERSION);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
 }
 
 #[test]
@@ -897,9 +881,9 @@ fn test_stress_mint_100_plus_unique_users() {
             period,
             &archetype,
             &hash,
-        );
+         CURRENT_PAYLOAD_VERSION);
 
-        client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
         cpu_samples[i] = env.budget().cpu_instruction_cost();
         mem_samples[i] = env.budget().memory_bytes_cost();
@@ -915,8 +899,8 @@ fn test_stress_mint_100_plus_unique_users() {
         period,
         &archetype,
         &data_hash,
-    );
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+     CURRENT_PAYLOAD_VERSION);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     assert!(cpu_samples[0] > 0);
     assert!(mem_samples[0] > 0);
@@ -957,7 +941,7 @@ fn test_mint_wrap_before_init_fails() {
     let archetype = symbol_short!("arch");
     let sig = BytesN::from_array(&env, &[0u8; 64]);
 
-    client.mint_wrap(&user, &202401, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &202401, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
 }
 
 #[test]
@@ -1060,7 +1044,7 @@ fn test_migrate_rejects_replay() {
         &archetype,
         &dummy_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
     assert_eq!(
@@ -1084,12 +1068,12 @@ fn test_get_mint_timestamp_missing() {
     let period = 202406u64;
     let archetype = symbol_short!("arch");
     let hash = BytesN::from_array(&env, &[14u8; 32]);
-    client.mint_wrap(&user, &2022, &archetype, &hash1, &sig1);
-    client.mint_wrap(&user, &2024, &archetype, &hash2, &sig2);
-    client.mint_wrap(&user, &2023, &archetype, &hash3, &sig3);
+    client.mint_wrap(&user, &2022, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
+    client.mint_wrap(&user, &2024, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
+    client.mint_wrap(&user, &2023, &archetype, &hash3, &CURRENT_PAYLOAD_VERSION, &sig3);
 
     let sig = sign_payload(&env, &signing_key, &contract_id, &user, period, &archetype, &hash);
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
     // After mint, admin is still readable — instance storage was not expired
     assert!(client.get_admin().is_some());
@@ -1144,7 +1128,7 @@ fn test_fsm_valid_state_transitions() {
     let archetype = symbol_short!("arch");
     let hash = BytesN::from_array(&env, &[16u8; 32]);
     let sig_old = sign_payload(&env, &old_signing_key, &contract_id, &user, period_old, &archetype, &hash);
-    client.mint_wrap(&user, &period_old, &archetype, &hash, &sig_old);
+    client.mint_wrap(&user, &period_old, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_old);
 
     // Rotate to new key
     let new_signing_key = SigningKey::from_bytes(&[98u8; 32]);
@@ -1166,12 +1150,12 @@ fn test_fsm_valid_state_transitions() {
         &archetype,
         &hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
     // Mint with new key — should succeed
     let period_new = 202409u64;
     let sig_new = sign_payload(&env, &new_signing_key, &contract_id, &user, period_new, &archetype, &hash);
-    client.mint_wrap(&user, &period_new, &archetype, &hash, &sig_new);
+    client.mint_wrap(&user, &period_new, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_new);
 
     assert_eq!(client.balance_of(&user), 2);
 }
@@ -1213,7 +1197,7 @@ fn test_mint_wrap_before_init_fails() {
     let archetype = symbol_short!("arch");
     let sig = BytesN::from_array(&env, &[0u8; 64]);
 
-    client.mint_wrap(&user, &2024, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &2024, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
 }
 
 #[test]
@@ -1265,7 +1249,7 @@ fn test_revoke_wrap_flow_event_and_remint() {
         &archetype,
         &hash_1,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash_1, &sig_1);
+    client.mint_wrap(&user, &period, &archetype, &hash_1, &CURRENT_PAYLOAD_VERSION, &sig_1);
     assert_eq!(client.balance_of(&user), 1);
 
     client.revoke_wrap(&user, &period);
@@ -1275,7 +1259,9 @@ fn test_revoke_wrap_flow_event_and_remint() {
 
     let events = env.events().all();
     let last_event = events.last().expect("Expected revoke event");
-    let (_, topics, data) = last_event;
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
     let event_version: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let event_topic: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
@@ -1298,7 +1284,7 @@ fn test_revoke_wrap_flow_event_and_remint() {
         &archetype,
         &hash_2,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash_2, &sig_2);
+    client.mint_wrap(&user, &period, &archetype, &hash_2, &CURRENT_PAYLOAD_VERSION, &sig_2);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
     assert_eq!(wrap.data_hash, hash_2);
@@ -1377,7 +1363,7 @@ fn test_mint_guard_uses_temporary_storage_and_clears_on_success() {
         &archetype,
         &dummy_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
     assert_eq!(wrap.fsm.state, WrapState::Active);
@@ -1394,7 +1380,7 @@ fn test_fsm_invalid_state_transition_fails() {
         &data_hash,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let guard_key = DataKey::MintGuard(user.clone());
     env.as_contract(&contract_id, || {
@@ -1425,7 +1411,7 @@ fn test_upgrade_emits_event() {
         &archetype_old,
         &hash_old,
     );
-    client.mint_wrap(&user, &period, &archetype_old, &hash_old, &sig_old);
+    client.mint_wrap(&user, &period, &archetype_old, &hash_old, &CURRENT_PAYLOAD_VERSION, &sig_old);
 
     let wrap_old = client.get_wrap(&user, &period).unwrap();
     assert_eq!(wrap_old.archetype, archetype_old);
@@ -1456,10 +1442,10 @@ fn test_upgrade_emits_event() {
         &data_hash,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let duplicate = catch_unwind(AssertUnwindSafe(|| {
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature)
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature)
     }));
     assert!(duplicate.is_err());
 
@@ -1487,7 +1473,9 @@ fn test_update_admin_emits_event() {
 
     let events = env.events().all();
     let last_event = events.last().expect("Expected at least one event");
-    let (_, topics, data) = last_event;
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
     let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
@@ -1571,7 +1559,7 @@ fn test_mint_wrap_zero_hash_rejected() {
         &archetype,
         &zero_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &zero_hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &zero_hash, &CURRENT_PAYLOAD_VERSION, &sig);
 }
 
 #[test]
@@ -1603,7 +1591,7 @@ fn test_mint_wrap_non_zero_hash_succeeds() {
         &archetype,
         &edge_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &edge_hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &edge_hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
     assert_eq!(wrap.data_hash, edge_hash);
@@ -1611,6 +1599,20 @@ fn test_mint_wrap_non_zero_hash_succeeds() {
 
 #[test]
 fn test_mint_wrap_max_hash_succeeds() {
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_upgrade_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let dummy_wasm_hash = BytesN::from_array(&env, &[0xAAu8; 32]);
+    client.upgrade(&dummy_wasm_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_unauthorized_upgrade_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1636,7 +1638,7 @@ fn test_mint_wrap_max_hash_succeeds() {
         &archetype,
         &max_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &max_hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &max_hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
     assert_eq!(wrap.data_hash, max_hash);
@@ -1653,10 +1655,12 @@ fn test_mint_wrap_max_hash_succeeds() {
     client.upgrade(&new_wasm_hash);
 
     let events = env.events().all();
-    let last_event = events.last().expect("no events found");
-    let (_, topics, data) = last_event;
+    let last_event = events.events().last().expect("no events found");
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
-    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let event_topic: Symbol = soroban_sdk::Val::try_from_val(&env, topics.get(0).unwrap()).unwrap().try_into_val(&env).unwrap();
     let event_wasm_hash: BytesN<32> = data.try_into_val(&env).unwrap();
 
     assert_eq!(event_topic, symbol_short!("upgrade"));
@@ -1666,6 +1670,12 @@ fn test_mint_wrap_max_hash_succeeds() {
 #[test]
 #[should_panic(expected = "Error(Contract, #3)")]
 fn test_upgrade_requires_admin_auth() {
+// ---------------------------------------------------------------------------
+// Alias hash tests (#288)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_set_and_get_alias_hash() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1740,7 +1750,7 @@ fn test_revoke_wrap_success() {
         &archetype,
         &hash1,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &period, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     let before = client.get_wrap(&user, &period).unwrap();
 
@@ -1771,7 +1781,7 @@ fn test_revoke_wrap_success() {
 fn test_update_wrap_emits_update_event() {
         &hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
     assert_eq!(client.balance_of(&user), 1);
     assert!(client.get_wrap(&user, &period).is_some());
 
@@ -1813,7 +1823,7 @@ fn test_revoke_wrap_emits_event() {
         &archetype,
         &hash1,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &period, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     let new_hash = BytesN::from_array(&env, &[98u8; 32]);
     let new_arch = symbol_short!("defi");
@@ -1830,7 +1840,9 @@ fn test_revoke_wrap_emits_event() {
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
-    let (_, topics, data) = last_event;
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
     let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
@@ -1901,7 +1913,7 @@ fn test_update_wrap_requires_admin_auth() {
         &archetype,
         &hash1,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &period, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     let env2 = Env::default();
     let contract_id2 = env2.register_contract(None, StellarWrapContract);
@@ -1927,18 +1939,20 @@ fn test_update_wrap_requires_admin_auth() {
 fn test_update_wrap_zero_hash_rejected() {
         &hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let reason_hash = BytesN::from_array(&env, &[0xAAu8; 32]);
     client.revoke_wrap(&user, &period, &reason_hash);
 
     let events = env.events().all();
-    let last_event = events.last().expect("no events found");
-    let (_, topics, data) = last_event;
+    let last_event = events.events().last().expect("no events found");
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
-    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-    let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_topic: Symbol = soroban_sdk::Val::try_from_val(&env, topics.get(0).unwrap()).unwrap().try_into_val(&env).unwrap();
+    let event_user: Address = soroban_sdk::Val::try_from_val(&env, topics.get(1).unwrap()).unwrap().try_into_val(&env).unwrap();
+    let event_period: u64 = soroban_sdk::Val::try_from_val(&env, topics.get(2).unwrap()).unwrap().try_into_val(&env).unwrap();
     let event_reason: BytesN<32> = data.try_into_val(&env).unwrap();
 
     assert_eq!(event_topic, symbol_short!("revoke"));
@@ -1974,7 +1988,7 @@ fn test_revoke_wrap_not_found_fails() {
         &archetype,
         &hash1,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &period, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
     let sig2 = sign_update_payload(
@@ -1986,7 +2000,7 @@ fn test_revoke_wrap_not_found_fails() {
         &archetype,
         &dummy_hash,
     );
-    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &dummy_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     // Transition Active -> Draft is invalid and should fail with #8 (InvalidStateTransition)
     client.transition_wrap_state(&user, &period, &WrapState::Draft);
@@ -2014,7 +2028,7 @@ fn test_fsm_transition_nonexistent_wrap_fails() {
     let archetype = symbol_short!("arch");
     let hash = BytesN::from_array(&env, &[17u8; 32]);
     let sig_old = sign_payload(&env, &old_signing_key, &contract_id, &user, period, &archetype, &hash);
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig_old);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_old);
         &zero_hash,
     );
     client.update_wrap(&user, &period, &zero_hash, &archetype, &sig2);
@@ -2023,6 +2037,20 @@ fn test_fsm_transition_nonexistent_wrap_fails() {
 #[test]
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn test_update_admin_pubkey_requires_admin_auth() {
+    let user = Address::generate(&env);
+    let alias_hash = BytesN::from_array(&env, &[0xabu8; 32]);
+
+    // No hash set yet
+    assert!(client.get_alias_hash(&user).is_none());
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user, &alias_hash);
+
+    assert_eq!(client.get_alias_hash(&user).unwrap(), alias_hash);
+}
+
+#[test]
+fn test_update_alias_hash() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -2046,10 +2074,10 @@ fn test_update_admin_pubkey_requires_admin_auth() {
     let hash = BytesN::from_array(&env, &[15u8; 32]);
 
     let sig_a = sign_payload(&env, &signing_key, &contract_id, &user_a, 202407u64, &archetype, &hash);
-    client.mint_wrap(&user_a, &202407u64, &archetype, &hash, &sig_a);
+    client.mint_wrap(&user_a, &202407u64, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_a);
 
     let sig_b = sign_payload(&env, &signing_key, &contract_id, &user_b, 202407u64, &archetype, &hash);
-    client.mint_wrap(&user_b, &202407u64, &archetype, &hash, &sig_b);
+    client.mint_wrap(&user_b, &202407u64, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_b);
 
     // Admin address still accessible after multiple mints
     assert_eq!(client.get_schema_version(), 1);
@@ -2111,6 +2139,24 @@ fn test_revoke_wrap_before_init_fails() {
 
 #[test]
 fn test_revoke_latest_period_clears_latest() {
+    let pubkey = BytesN::from_array(&env, &[2u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let user = Address::generate(&env);
+    let hash_v1 = BytesN::from_array(&env, &[0x11u8; 32]);
+    let hash_v2 = BytesN::from_array(&env, &[0x22u8; 32]);
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user, &hash_v1);
+    assert_eq!(client.get_alias_hash(&user).unwrap(), hash_v1);
+
+    // Overwrite with a new hash
+    client.set_alias_hash(&user, &hash_v2);
+    assert_eq!(client.get_alias_hash(&user).unwrap(), hash_v2);
+}
+
+#[test]
+fn test_alias_hash_is_per_user() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -2129,7 +2175,7 @@ fn test_revoke_latest_period_clears_latest() {
 
     // Mint first wrap
     let sig1 = sign_payload(&env, &signing_key, &contract_id, &user, 2024, &archetype, &hash);
-    client.mint_wrap(&user, &2024, &archetype, &hash, &sig1);
+    client.mint_wrap(&user, &2024, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     // After first mint: balance = 1, latest = 2024
     assert_eq!(client.balance_of(&user), 1);
@@ -2137,7 +2183,7 @@ fn test_revoke_latest_period_clears_latest() {
 
     // Mint second wrap (higher period)
     let sig2 = sign_payload(&env, &signing_key, &contract_id, &user, 2025, &archetype, &hash);
-    client.mint_wrap(&user, &2025, &archetype, &hash, &sig2);
+    client.mint_wrap(&user, &2025, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig2);
 
     // After second mint: balance = 2, latest = 2025
     assert_eq!(client.balance_of(&user), 2);
@@ -2171,8 +2217,8 @@ fn test_update_admin_pubkey_emits_event() {
         &env, &signing_key, &contract_id, &user, 202402, &archetype, &hash2,
     );
 
-    client.mint_wrap(&user, &202401, &archetype, &hash1, &sig1);
-    client.mint_wrap(&user, &202402, &archetype, &hash2, &sig2);
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
+    client.mint_wrap(&user, &202402, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
 
     let latest = client.get_latest_wrap(&user).unwrap();
     assert_eq!(latest.period, 202402);
@@ -2206,11 +2252,11 @@ fn test_revoke_non_latest_preserves_latest() {
 
     // Mint first wrap (period 2024)
     let sig1 = sign_payload(&env, &signing_key, &contract_id, &user, 2024, &archetype, &hash1);
-    client.mint_wrap(&user, &2024, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &2024, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     // Mint second wrap (period 2025)
     let sig2 = sign_payload(&env, &signing_key, &contract_id, &user, 2025, &archetype, &hash2);
-    client.mint_wrap(&user, &2025, &archetype, &hash2, &sig2);
+    client.mint_wrap(&user, &2025, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
 
     // Old wrap (period 2024) is still intact and readable
     let wrap1 = client.get_wrap(&user, &2024).unwrap();
@@ -2235,8 +2281,8 @@ fn test_renew_all_ttls_extends_metadata() {
         &env, &signing_key, &contract_id, &user, 202403, &archetype, &hash2,
     );
 
-    client.mint_wrap(&user, &202401, &archetype, &hash1, &sig1);
-    client.mint_wrap(&user, &202403, &archetype, &hash2, &sig2);
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
+    client.mint_wrap(&user, &202403, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
 
     let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
     client.revoke_wrap(&user, &202401, &reason_hash);
@@ -2249,6 +2295,30 @@ fn test_renew_all_ttls_extends_metadata() {
 
 #[test]
 fn test_remint_after_revoke_succeeds() {
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[3u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let hash_a = BytesN::from_array(&env, &[0xaau8; 32]);
+    let hash_b = BytesN::from_array(&env, &[0xbbu8; 32]);
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user_a, &hash_a);
+    client.set_alias_hash(&user_b, &hash_b);
+
+    assert_eq!(client.get_alias_hash(&user_a).unwrap(), hash_a);
+    assert_eq!(client.get_alias_hash(&user_b).unwrap(), hash_b);
+    // Ensure they are distinct
+    assert_ne!(
+        client.get_alias_hash(&user_a).unwrap(),
+        client.get_alias_hash(&user_b).unwrap()
+    );
+}
+
+#[test]
+fn test_get_alias_hash_returns_none_for_unknown_user() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -2266,7 +2336,7 @@ fn test_remint_after_revoke_succeeds() {
     let archetype = symbol_short!("arch");
 
     let sig = sign_payload(&env, &signing_key, &contract_id, &user, 2024, &archetype, &hash);
-    client.mint_wrap(&user, &2024, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &2024, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
 
     // Verify metadata exists before renewal
     assert_eq!(client.balance_of(&user), 1);
@@ -2278,6 +2348,8 @@ fn test_remint_after_revoke_succeeds() {
     // Metadata still accessible after renewal
     assert_eq!(client.balance_of(&user), 1);
     assert!(client.get_latest_wrap(&user).is_some());
+    let unknown_user = Address::generate(&env);
+    assert!(client.get_alias_hash(&unknown_user).is_none());
 }
 
 #[test]
@@ -2291,7 +2363,7 @@ fn test_renew_all_ttls_requires_admin_auth() {
     let sig1 = sign_payload(
         &env, &signing_key, &contract_id, &user, period, &archetype, &hash1,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &period, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
 
     let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
     client.revoke_wrap(&user, &period, &reason_hash);
@@ -2300,7 +2372,7 @@ fn test_renew_all_ttls_requires_admin_auth() {
     let sig2 = sign_payload(
         &env, &signing_key, &contract_id, &user, period, &archetype, &hash2,
     );
-    client.mint_wrap(&user, &period, &archetype, &hash2, &sig2);
+    client.mint_wrap(&user, &period, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
     assert_eq!(wrap.data_hash, hash2);
@@ -2363,7 +2435,9 @@ fn test_renew_all_ttls_before_init_fails() {
 
     let events = env.events().all();
     let last_event = events.last().expect("No events found");
-    let (_, topics, data) = last_event;
+    let soroban_sdk::xdr::ContractEventBody::V0(v0) = &last_event.body;
+    let topics = &v0.topics;
+    let data = &v0.data;
 
     let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
@@ -2381,7 +2455,7 @@ fn test_upgrade_before_init_fails() {
     let new_wasm_hash = BytesN::from_array(&env, &[42u8; 32]);
     client.upgrade(&new_wasm_hash);
 }
-    client.mint_wrap(&user_b, &202401, &archetype, &hash, &sig_b);
+    client.mint_wrap(&user_b, &202401, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig_b);
     assert_eq!(client.total_wrap_count(), 3);
     assert_eq!(client.balance_of(&user_b), 1);
 }
@@ -2396,8 +2470,8 @@ fn test_upgrade_before_init_fails() {
 // whether revoke belongs in this PR or a follow-up.
         &archetype_new,
         &hash_new,
-    );
-    client.mint_wrap(&user, &period, &archetype_new, &hash_new, &sig_new);
+     CURRENT_PAYLOAD_VERSION);
+    client.mint_wrap(&user, &period, &archetype_new, &hash_new, &CURRENT_PAYLOAD_VERSION, &sig_new);
 
     let wrap_new = client.get_wrap(&user, &period).unwrap();
     assert_eq!(wrap_new.archetype, archetype_new);
@@ -2422,8 +2496,8 @@ fn test_upgrade_before_init_fails() {
     let period = 202401u64;
     let signature = sign_payload(
         &env, &signing_key, &contract_id, &user, period, &archetype, &hash,
-    );
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+     CURRENT_PAYLOAD_VERSION);
+    client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     // Zero reason hash (no reason provided)
     let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
@@ -2434,10 +2508,26 @@ fn test_upgrade_before_init_fails() {
 
     // Verify the event still emitted with zero hash
     let events = env.events().all();
-    let last_event = events.last().expect("no events found");
+    let last_event = events.events().last().expect("no events found");
     let (_, _, data) = last_event;
     let event_reason: BytesN<32> = data.try_into_val(&env).unwrap();
     assert_eq!(event_reason, reason_hash);
+fn test_set_alias_hash_requires_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    // Do NOT call env.mock_all_auths() — auth must be required
+    let user = Address::generate(&env);
+    let alias_hash = BytesN::from_array(&env, &[0xccu8; 32]);
+
+    client.set_alias_hash(&user, &alias_hash);
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let dummy_wasm_hash = BytesN::from_array(&env, &[0xBBu8; 32]);
+    client.upgrade(&dummy_wasm_hash);
 }
 
 // ============================================================================

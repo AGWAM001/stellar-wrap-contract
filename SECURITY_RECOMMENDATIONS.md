@@ -245,6 +245,109 @@ production.
 
 ---
 
+## 🔄 Payload Versioning & Backend Migration Process (#274)
+
+### Why Payload Versioning Exists
+
+The canonical payload format may evolve (e.g., adding new signed fields like `metadata`,
+`archetype_allowlist_revision`, or `expiry_ledger`). Without a version prefix,
+a signature produced against an older payload schema could be successfully
+re-submitted to a newer contract if the remaining fields happen to match — a
+cross-version replay attack.
+
+This contract defends against this by:
+
+1. Prepending `payload_version: u32` as the **first** element of every signed
+   payload.
+2. Rejecting any `mint_wrap` call where the provided `payload_version` does not
+   equal `CURRENT_PAYLOAD_VERSION` (currently `1`) — it panics with
+   `Error(Contract, #5)` / ContractError::InvalidSignature`).
+
+**On-chain payload (v1):
+```
+payload = XDR(payload_version: u32)
+        ‖ XDR(contract_address)
+        ‖ XDR(user)
+        ‖ XDR(period)
+        ‖ XDR(archetype)
+        ‖ XDR(data_hash)
+```
+
+### On-chain Version Evolution Rules
+- **Rust location:** `src/mint.rs:8` (`CURRENT_PAYLOAD_VERSION = 1`)
+- **Validation:** `src/mint.rs:19-23` (`validate_payload_version`)
+- **Prepend order:** `src/mint.rs:42` (version is the first field in the payload)
+
+### Backend Migration Checklist
+
+#### Step 1 — Contract upgrade (Soroban CLI)
+
+Bump the version number in `src/mint.rs:8` (`CURRENT_PAYLOAD_VERSION = 1 -> 2`),
+then redeploy the WASM via `soroban contract upgrade`, and finally update the payload schema
+(see `Makefile` targets. Deploy via `soroban contract upgrade`).
+
+#### Step 2 — Backend signing code (pdate
+When the new contract lands on-chain, update the backend signer to prepend the new
+version:
+
+```python
+# BEFORE (no version prefix)
+payload = (
+    contract.to_xdr()
+    + user.to_xdr()
+    + period.to_xdr()
+    + archetype.to_xdr()
+    + data_hash.to_xdr()
+)
+signature = admin_ed25519_sign(payload)
+
+# AFTER — prepend payload_version as a LE u32 XDR-encoded
+payload_version = 2  # MUST match CURRENT_PAYLOAD_VERSION in src/mint.rs
+payload = (
+    xdr_u32(payload_version)
+    + contract.to_xdr()
+    + user.to_xdr()
+    + period.to_xdr()
+    + archetype.to_xdr()
+    + data_hash.to_xdr()
+)
+signature = admin_ed25519_sign(payload)
+```
+
+```
+* Order matters: payload_version MUST be the first bytes in the serialized buffer,
+because the contract appends it in `src/mint.rs:42`.
+
+#### Step 3 — Cutover & dual-signing)
+
+To avoid a race windows during the WASM upgrade:
+1. Roll out backend code accepts old-style signatures to accept both versions while the network still only
+   old contract:
+     - *Option A — Deploy in two phases:
+     first deploy a "accepts both v1 and v2 signatures (by temporarily
+        wideningvalidate_payload_version to accept an allow list), then
+        swap back once backend clients.
+     - *Option B (simpler, recommended — Perform the contract upgrade in a
+        single ledger window; do not send mints during the swap.  Ledger
+        sequenced to
+#### Step 4 ) Verify against replay safety
+After upgrade:
+```bash
+cargo test test_cross_version_replay  # run the version-gating tests added
+cargo test test::test_same_version_sig_succeeds
+```
+
+Tests added covering the attack vectors:
+
+| Test | Attack | Result |
+|------|--------|--------|
+| `test_cross_version_replay_v0_sig_submitted_as_v1_fails` | Sign with v0 = 0; submit with v=CURRENT=1 | PANIC #5 |
+| `test_cross_version_replay_v2_sig_submitted_as_v1_fails` | Sign with v2; submit with v=CURRENT=1 | PANIC #5 |
+| `test_same_version_sig_succeeds` | Sign and submit same v=CURRENT | SUCCESS |
+| `test_wrong_payload_version_alone_fails_even_with_matching_sig` | Sign v=CURRENT but submit v=99 | PANIC #5 |
+
+---
+
 ## 📊 Gas / Resource Analysis
 
 ```bash
