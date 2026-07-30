@@ -82,6 +82,7 @@ Backend signers must include this version byte in all new mint signatures. This 
   Returns the wrap record for the specified user and period. Safe to call before initialization — returns `None` if the contract has not been initialized or if no wrap exists for the given user and period.
 - `balance_of(e: Env, user: Address) -> i128`
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
+- `verify_with_oracle(e: Env, oracle: Address, data_hash: BytesN<32>) -> bool`
 - `get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord>`
 - `get_admin(e: Env) -> Option<Address>`
 - `health(e: Env) -> ContractHealth`
@@ -89,6 +90,25 @@ Backend signers must include this version byte in all new mint signatures. This 
 - `symbol(e: Env) -> String`
 - `decimals(e: Env) -> u32`
 - `migration_version(e: Env) -> u32`
+
+## Oracle hash verification
+
+`verify_with_oracle` performs a read-only cross-contract call to the supplied
+oracle address. A compatible oracle exposes this ABI:
+
+```text
+verify_data_hash(data_hash: BytesN<32>) -> bool
+```
+
+The hash is forwarded unchanged. The oracle returns `true` when its
+decentralized verification process recognizes the hash and `false` when it
+does not. Contract invocation failures, a missing method, and incompatible
+return values propagate as call errors; they are never converted to `false`.
+
+The caller supplies the oracle address, so a `true` response is only as
+trustworthy as that selected oracle. Applications should use a vetted oracle
+contract ID from their own configuration. This method does not mutate wrap
+records and does not replace the local `verify_data` comparison.
 
 ## Event schemas
 

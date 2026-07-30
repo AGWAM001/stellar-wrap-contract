@@ -25,14 +25,15 @@ mod admin;
 mod alias;
 mod errors;
 mod mint;
+mod oracle;
 mod queries;
 mod revoke;
 pub mod signature;
 mod storage_accounting;
 mod storage_types;
 
-pub use errors::ContractError;
 pub use mint::CURRENT_PAYLOAD_VERSION;
+pub use oracle::DataHashOracle;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
 
 #[contract]
@@ -143,6 +144,14 @@ impl StellarWrapContract {
 
     pub fn verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool {
         queries::verify_data(e, user, period, data)
+    }
+
+    /// Asks an external oracle contract whether `data_hash` is recognized.
+    ///
+    /// The oracle must expose `verify_data_hash(BytesN<32>) -> bool`.
+    /// Oracle invocation and ABI errors propagate to the caller.
+    pub fn verify_with_oracle(e: Env, oracle: Address, data_hash: BytesN<32>) -> bool {
+        oracle::verify_data_hash(&e, &oracle, &data_hash)
     }
 
     pub fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
@@ -323,6 +332,8 @@ impl StellarWrapContract {
     }
 }
 
+#[cfg(test)]
+mod oracle_test;
 #[cfg(test)]
 mod security_test;
 #[cfg(test)]
