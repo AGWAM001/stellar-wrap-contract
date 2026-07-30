@@ -624,3 +624,318 @@ fn test_non_admin_cannot_revoke() {
     let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
     client.revoke_wrap(&user, &202512, &reason_hash);
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Two-Step Admin Transfer Tests (Issue #269)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Test 11: Successful Two-Step Admin Transfer (Proposal + Acceptance)
+/// Verifies the complete happy path: admin proposes, pending admin accepts.
+#[test]
+fn test_two_step_admin_transfer_success() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Step 1: Current admin proposes new_admin
+    client.propose_admin(&new_admin);
+
+    // Verify pending_admin is set
+    assert_eq!(client.get_pending_admin().unwrap(), new_admin);
+    // Verify current admin is still the same
+    assert_eq!(client.get_admin().unwrap(), admin);
+
+    // Step 2: Pending admin accepts
+    client.accept_admin();
+
+    // Verify admin has been transferred
+    assert_eq!(client.get_admin().unwrap(), new_admin);
+    // Verify pending_admin is cleared
+    assert!(client.get_pending_admin().is_none());
+}
+
+/// Test 12: Admin Can Cancel a Pending Proposal
+/// Verifies that the current admin can cancel a proposed transfer before acceptance.
+#[test]
+fn test_admin_cancel_proposed_admin() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[2u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Admin proposes
+    client.propose_admin(&new_admin);
+    assert_eq!(client.get_pending_admin().unwrap(), new_admin);
+
+    // Admin cancels
+    client.cancel_proposed_admin();
+
+    // Verify proposal is cleared
+    assert!(client.get_pending_admin().is_none());
+    // Verify admin remains unchanged
+    assert_eq!(client.get_admin().unwrap(), admin);
+}
+
+/// Test 13: Unauthorized Acceptance Fails - Non-Pending-Admin Cannot Accept
+/// Verifies that an address other than the proposed admin cannot accept the transfer.
+#[test]
+#[should_panic]
+fn test_unauthorized_acceptance_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[3u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+
+    // Set up auths manually to control who is authenticating
+    // Admin proposes new_admin
+    env.set_auths(&[(&admin, &contract_id, symbol_short!("propose_admin"), ())]);
+    client.propose_admin(&new_admin);
+    assert_eq!(client.get_pending_admin().unwrap(), new_admin);
+
+    // Attacker tries to accept - should panic because attacker != new_admin
+    env.set_auths(&[(&attacker, &contract_id, symbol_short!("accept_admin"), ())]);
+    client.accept_admin();
+}
+
+/// Test 14: Accepting Without a Proposal Fails
+/// Verifies that accept_admin panics when there is no pending proposal.
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_accept_admin_no_proposal_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[4u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // No proposal exists - should panic with NoAdminTransferProposal
+    client.accept_admin();
+}
+
+/// Test 15: Proposing When a Proposal Already Exists Fails
+/// Verifies that propose_admin panics when there is already a pending proposal.
+#[test]
+#[should_panic(expected = "Error(Contract, #8)")]
+fn test_propose_admin_when_proposal_exists_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin_1 = Address::generate(&env);
+    let new_admin_2 = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[5u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // First proposal
+    client.propose_admin(&new_admin_1);
+    assert_eq!(client.get_pending_admin().unwrap(), new_admin_1);
+
+    // Try to propose again without canceling - should panic
+    client.propose_admin(&new_admin_2);
+}
+
+/// Test 16: Canceling When No Proposal Exists Fails
+/// Verifies that cancel_proposed_admin panics when there is no pending proposal.
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_cancel_no_proposal_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[6u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // No proposal exists - should panic with NoAdminTransferProposal
+    client.cancel_proposed_admin();
+}
+
+/// Test 17: Non-Admin Cannot Propose a New Admin
+/// Verifies that only the current admin can call propose_admin.
+#[test]
+#[should_panic]
+fn test_non_admin_cannot_propose_admin() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[7u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+
+    // Attacker tries to propose - should panic due to require_auth failure
+    env.set_auths(&[(&attacker, &contract_id, symbol_short!("propose_admin"), ())]);
+    client.propose_admin(&new_admin);
+}
+
+/// Test 18: Non-Admin Cannot Cancel a Pending Proposal
+/// Verifies that only the current admin can cancel a proposal.
+#[test]
+#[should_panic]
+fn test_non_admin_cannot_cancel_proposal() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[8u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+
+    // Admin proposes (mock admin auth)
+    env.set_auths(&[(&admin, &contract_id, symbol_short!("propose_admin"), ())]);
+    client.propose_admin(&new_admin);
+    assert_eq!(client.get_pending_admin().unwrap(), new_admin);
+
+    // Attacker tries to cancel - should panic due to require_auth failure
+    env.set_auths(&[(&attacker, &contract_id, symbol_short!("cancel_proposed_admin"), ())]);
+    client.cancel_proposed_admin();
+}
+
+/// Test 19: update_admin (Single-Step) Clears Pending Proposal - Backward Compatibility
+/// Verifies that the legacy single-step update_admin clears any pending proposal
+/// and successfully transfers admin rights.
+#[test]
+fn test_update_admin_clears_pending_proposal() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let proposed_admin = Address::generate(&env);
+    let direct_new_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[9u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // Admin proposes a transfer
+    client.propose_admin(&proposed_admin);
+    assert_eq!(client.get_pending_admin().unwrap(), proposed_admin);
+    assert_eq!(client.get_admin().unwrap(), admin);
+
+    // Admin bypasses two-step flow using update_admin (legacy)
+    client.update_admin(&direct_new_admin);
+
+    // Verify direct_new_admin is now the admin
+    assert_eq!(client.get_admin().unwrap(), direct_new_admin);
+    // Verify pending proposal was cleared
+    assert!(client.get_pending_admin().is_none());
+}
+
+/// Test 20: get_pending_admin Returns None When No Proposal
+/// Verifies the getter correctly returns None when there is no pending transfer.
+#[test]
+fn test_get_pending_admin_none() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[10u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+
+    // No proposal made
+    assert!(client.get_pending_admin().is_none());
+}
+
+/// Test 21: Propose Then Repropose After Cancel
+/// Verifies that after canceling a proposal, the admin can propose a new one.
+#[test]
+fn test_propose_cancel_repropose() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let first_proposal = Address::generate(&env);
+    let second_proposal = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[11u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    // First proposal
+    client.propose_admin(&first_proposal);
+    assert_eq!(client.get_pending_admin().unwrap(), first_proposal);
+
+    // Cancel
+    client.cancel_proposed_admin();
+    assert!(client.get_pending_admin().is_none());
+
+    // Propose a different admin
+    client.propose_admin(&second_proposal);
+    assert_eq!(client.get_pending_admin().unwrap(), second_proposal);
+
+    // Accept the second proposal
+    client.accept_admin();
+    assert_eq!(client.get_admin().unwrap(), second_proposal);
+    assert!(client.get_pending_admin().is_none());
+}
+
+/// Test 22: After Acceptance, New Admin Can Propose Further Transfers
+/// Verifies the chain of ownership works: once accepted, the new admin
+/// can initiate their own two-step transfers.
+#[test]
+fn test_new_admin_can_propose_further_transfers() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin_1 = Address::generate(&env);
+    let admin_2 = Address::generate(&env);
+    let admin_3 = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[12u8; 32]);
+
+    client.initialize(&admin_1, &pubkey);
+    env.mock_all_auths();
+
+    // Admin1 -> Admin2 via two-step
+    client.propose_admin(&admin_2);
+    client.accept_admin();
+    assert_eq!(client.get_admin().unwrap(), admin_2);
+
+    // Admin2 -> Admin3 via two-step
+    client.propose_admin(&admin_3);
+    assert_eq!(client.get_pending_admin().unwrap(), admin_3);
+    client.accept_admin();
+
+    // Final state
+    assert_eq!(client.get_admin().unwrap(), admin_3);
+    assert!(client.get_pending_admin().is_none());
+}
