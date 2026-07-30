@@ -52,30 +52,30 @@ fn test_replay_attack_same_period_fails() {
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
 
-    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
+    // First mint: legitimate wrap creation
+    let original_data_hash = BytesN::from_array(&env, &[42u8; 32]);
     let archetype = symbol_short!("architect");
     let period = 202512u64;
 
-    let signature = sign_payload(
+    let legitimate_signature = sign_payload(
         &env,
         &signing_key,
         &contract_id,
         &user,
         period,
         &archetype,
-        &data_hash,
+        &original_data_hash,
         CURRENT_PAYLOAD_VERSION,
     );
 
-    // First mint - should succeed
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    client.mint_wrap(&user, &period, &archetype, &original_data_hash, &CURRENT_PAYLOAD_VERSION, &legitimate_signature);
 
     let wrap = client.get_wrap(&user, &period);
     assert!(wrap.is_some(), "First mint should succeed");
 
-    // Replay attack: Try to mint again with the exact same parameters
-    // This should PANIC with WrapAlreadyExists error (#4)
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    // Replay attack: Attacker replays the exact same valid signature & parameters
+    // expecting the contract to accept it again. Should panic with WrapAlreadyExists (#4).
+    client.mint_wrap(&user, &period, &archetype, &original_data_hash, &CURRENT_PAYLOAD_VERSION, &legitimate_signature);
 }
 
 #[test]
@@ -93,39 +93,42 @@ fn test_replay_attack_different_hash_same_period_fails() {
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
 
-    let data_hash_1 = BytesN::from_array(&env, &[42u8; 32]);
-    let data_hash_2 = BytesN::from_array(&env, &[99u8; 32]);
+    // Legitimate first mint with original data
+    let original_data_hash = BytesN::from_array(&env, &[42u8; 32]);
+    // Attacker tries to use a different hash but same period
+    let tampered_data_hash = BytesN::from_array(&env, &[99u8; 32]);
     let archetype = symbol_short!("architect");
     let period = 202512u64;
 
-    let signature_1 = sign_payload(
+    let original_mint_signature = sign_payload(
         &env,
         &signing_key,
         &contract_id,
         &user,
         period,
         &archetype,
-        &data_hash_1,
+        &original_data_hash,
         CURRENT_PAYLOAD_VERSION,
     );
 
-    // First mint - should succeed
-    client.mint_wrap(&user, &period, &archetype, &data_hash_1, &CURRENT_PAYLOAD_VERSION, &signature_1);
+    // First mint with original data - should succeed
+    client.mint_wrap(&user, &period, &archetype, &original_data_hash, &CURRENT_PAYLOAD_VERSION, &original_mint_signature);
 
-    let signature_2 = sign_payload(
+    // Attack: Attacker obtains a valid admin signature for tampered data and tries
+    // to mint for the same period as a legitimate wrap. Should fail because the
+    // period is already claimed (WrapAlreadyExists, error #4).
+    let tampered_data_signature = sign_payload(
         &env,
         &signing_key,
         &contract_id,
         &user,
         period,
         &archetype,
-        &data_hash_2,
+        &tampered_data_hash,
         CURRENT_PAYLOAD_VERSION,
     );
 
-    // Try to mint again for the same period with a different hash
-    // This should still fail - period is already used
-    client.mint_wrap(&user, &period, &archetype, &data_hash_2, &CURRENT_PAYLOAD_VERSION, &signature_2);
+    client.mint_wrap(&user, &period, &archetype, &tampered_data_hash, &CURRENT_PAYLOAD_VERSION, &tampered_data_signature);
 }
 
 #[test]
@@ -207,38 +210,40 @@ fn test_signature_cannot_be_stolen_by_another_user() {
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
 
-    let data_hash_for_a = BytesN::from_array(&env, &[42u8; 32]);
+    // User A's legitimate wrap data
+    let legitimate_data_user_a = BytesN::from_array(&env, &[42u8; 32]);
     let archetype = symbol_short!("architect");
     let period = 202512u64;
 
-    let signature_a = sign_payload(
+    let signature_for_user_a = sign_payload(
         &env,
         &signing_key,
         &contract_id,
         &user_a,
         period,
         &archetype,
-        &data_hash_for_a,
+        &legitimate_data_user_a,
         CURRENT_PAYLOAD_VERSION,
     );
 
-    // User A mints successfully
-    client.mint_wrap(&user_a, &period, &archetype, &data_hash_for_a, &CURRENT_PAYLOAD_VERSION, &signature_a);
+    // User A mints successfully with their own signature
+    client.mint_wrap(&user_a, &period, &archetype, &legitimate_data_user_a, &CURRENT_PAYLOAD_VERSION, &signature_for_user_a);
 
     let wrap_a = client.get_wrap(&user_a, &period);
     assert!(wrap_a.is_some(), "User A should have the wrap");
 
-    let data_hash_for_b = BytesN::from_array(&env, &[99u8; 32]);
+    // User B's legitimate (separate) wrap data — signature is bound to user_b
+    let legitimate_data_user_b = BytesN::from_array(&env, &[99u8; 32]);
     let period_b = 202601u64;
 
-    let signature_b = sign_payload(
+    let signature_for_user_b = sign_payload(
         &env,
         &signing_key,
         &contract_id,
         &user_b,
         period_b,
         &archetype,
-        &data_hash_for_b,
+        &legitimate_data_user_b,
         CURRENT_PAYLOAD_VERSION,
     );
 
@@ -246,16 +251,18 @@ fn test_signature_cannot_be_stolen_by_another_user() {
         &user_b,
         &period_b,
         &archetype,
-        &data_hash_for_b,
+        &legitimate_data_user_b,
         &CURRENT_PAYLOAD_VERSION,
-        &signature_b,
+        &signature_for_user_b,
     );
 
+    // Attack scenario verification: User B's signature was bound to user_b's own
+    // address in the payload, so user_b cannot steal user_a's wrap.
     let wrap_a = client.get_wrap(&user_a, &period).unwrap();
     let wrap_b = client.get_wrap(&user_b, &period_b).unwrap();
 
-    assert_eq!(wrap_a.data_hash, data_hash_for_a);
-    assert_eq!(wrap_b.data_hash, data_hash_for_b);
+    assert_eq!(wrap_a.data_hash, legitimate_data_user_a);
+    assert_eq!(wrap_b.data_hash, legitimate_data_user_b);
 
     let user_b_period_dec = client.get_wrap(&user_b, &period);
     assert!(
@@ -288,7 +295,8 @@ fn test_cross_contract_replay_protection() {
     let archetype = symbol_short!("architect");
     let period = 202512u64;
 
-    let signature_v1 = sign_payload(
+    // Legitimate signature for contract V1 (bound to V1's contract_id via payload)
+    let signature_for_v1 = sign_payload(
         &env,
         &signing_key,
         &contract_v1,
@@ -299,14 +307,14 @@ fn test_cross_contract_replay_protection() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
-    // Mint successfully on V1
-    client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_v1);
+    // Mint successfully on V1 using V1's own signature
+    client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_for_v1);
 
     let wrap_v1 = client_v1.get_wrap(&user, &period);
     assert!(wrap_v1.is_some(), "Wrap should exist on contract V1");
 
-    let signature_v2 = sign_payload(
+    // Legitimate signature for contract V2
+    let signature_for_v2 = sign_payload(
         &env,
         &signing_key,
         &contract_v2,
@@ -317,7 +325,7 @@ fn test_cross_contract_replay_protection() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_v2);
+    client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_for_v2);
 
     let wrap_v2 = client_v2.get_wrap(&user, &period);
     assert!(wrap_v2.is_some(), "Wrap should exist on contract V2");
@@ -333,8 +341,11 @@ fn test_cross_contract_replay_protection() {
         "Payloads should differ across contract instances"
     );
 
+    // Cross-contract replay attack: Attacker tries to use V1's signature
+    // (which was bound to contract_v1) to mint on contract V2.
+    // The payload differs because contract_id is embedded, so this should fail.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
+        client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_for_v1);
     }));
 
     assert!(
@@ -473,7 +484,7 @@ fn test_timestamp_is_from_ledger_not_user() {
     let archetype = symbol_short!("architect");
     let period = 202512u64;
 
-    let signature = sign_payload(
+    let signature_for_first_mint = sign_payload(
         &env,
         &signing_key,
         &contract_id,
@@ -484,18 +495,20 @@ fn test_timestamp_is_from_ledger_not_user() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    // Legitimate mint at ledger timestamp 1000000
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_for_first_mint);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
 
-    assert_eq!(wrap.timestamp, 1000000, "Timestamp should come from ledger");
+    assert_eq!(wrap.timestamp, 1000000, "Timestamp should come from ledger, not user");
 
+    // Advance ledger time (attacker cannot manipulate this)
     env.ledger().with_mut(|li| {
         li.timestamp = 2000000;
     });
 
     let period_2 = 202601u64;
-    let signature_2 = sign_payload(
+    let signature_for_second_mint = sign_payload(
         &env,
         &signing_key,
         &contract_id,
@@ -506,7 +519,8 @@ fn test_timestamp_is_from_ledger_not_user() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period_2, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_2);
+    // Second mint at new ledger timestamp — attacker cannot forge timestamps
+    client.mint_wrap(&user, &period_2, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_for_second_mint);
 
     let wrap_2 = client.get_wrap(&user, &period_2).unwrap();
     assert_eq!(
@@ -562,7 +576,7 @@ fn test_non_admin_cannot_mint() {
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
-    let _attacker = Address::generate(&env);
+    let _unauthorized_caller = Address::generate(&env);
 
     client.initialize(&admin, &admin_pubkey);
 
@@ -570,7 +584,9 @@ fn test_non_admin_cannot_mint() {
     let archetype = symbol_short!("architect");
     let period = 202512u64;
 
-    let signature = sign_payload(
+    // Valid signature for the legitimate user, but the caller
+    // (unauthorized_caller) has no auth — user.require_auth() will fail.
+    let valid_user_signature = sign_payload(
         &env,
         &signing_key,
         &contract_id,
@@ -581,8 +597,10 @@ fn test_non_admin_cannot_mint() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    // This should panic because attacker is not authorized
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    // Attack: An unauthorized address tries to invoke mint_wrap without
+    // the user's authorization. Should panic because user.require_auth()
+    // is enforced.
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &valid_user_signature);
 }
 
 /// Test 11: Revocation - Non-admin cannot revoke wraps
@@ -682,7 +700,7 @@ fn test_unauthorized_acceptance_fails() {
 
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
-    let attacker = Address::generate(&env);
+    let unauthorized_attacker = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[3u8; 32]);
 
     client.initialize(&admin, &pubkey);
@@ -693,8 +711,10 @@ fn test_unauthorized_acceptance_fails() {
     client.propose_admin(&new_admin);
     assert_eq!(client.get_pending_admin().unwrap(), new_admin);
 
-    // Attacker tries to accept - should panic because attacker != new_admin
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("accept_admin"), ())]);
+    // Attack: unauthorized_attacker tries to accept the admin transfer
+    // even though they are not the pending admin. Should panic because
+    // pending_admin.require_auth() is enforced.
+    env.set_auths(&[(&unauthorized_attacker, &contract_id, symbol_short!("accept_admin"), ())]);
     client.accept_admin();
 }
 
@@ -771,14 +791,16 @@ fn test_non_admin_cannot_propose_admin() {
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let attacker = Address::generate(&env);
+    let unauthorized_attacker = Address::generate(&env);
     let new_admin = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 32]);
 
     client.initialize(&admin, &pubkey);
 
-    // Attacker tries to propose - should panic due to require_auth failure
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("propose_admin"), ())]);
+    // Attack: unauthorized_attacker tries to propose themselves or another
+    // address as new admin. Should panic because current_admin.require_auth()
+    // is enforced — only the current admin can propose.
+    env.set_auths(&[(&unauthorized_attacker, &contract_id, symbol_short!("propose_admin"), ())]);
     client.propose_admin(&new_admin);
 }
 
@@ -793,7 +815,7 @@ fn test_non_admin_cannot_cancel_proposal() {
 
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
-    let attacker = Address::generate(&env);
+    let unauthorized_attacker = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[8u8; 32]);
 
     client.initialize(&admin, &pubkey);
@@ -803,8 +825,9 @@ fn test_non_admin_cannot_cancel_proposal() {
     client.propose_admin(&new_admin);
     assert_eq!(client.get_pending_admin().unwrap(), new_admin);
 
-    // Attacker tries to cancel - should panic due to require_auth failure
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("cancel_proposed_admin"), ())]);
+    // Attack: unauthorized_attacker tries to cancel the pending proposal.
+    // Should panic because only the current admin can cancel.
+    env.set_auths(&[(&unauthorized_attacker, &contract_id, symbol_short!("cancel_proposed_admin"), ())]);
     client.cancel_proposed_admin();
 }
 
