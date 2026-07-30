@@ -8,6 +8,10 @@ resolver = "2"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
+[features]
+# Enables SorobanArbitrary / testutils codegen required by cargo-fuzz targets.
+testutils = ["soroban-sdk/testutils"]
+
 [dependencies]
 soroban-sdk = "=27.0.3"
 # ed25519-dalek is a direct dependency (not just dev) to force Cargo version
