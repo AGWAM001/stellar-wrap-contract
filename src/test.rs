@@ -604,6 +604,52 @@ fn test_verify_data_no_wrap_exists() {
 }
 
 #[test]
+fn test_get_wrap_existing_user_nonexistent_period() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[15u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    // Mint a wrap for the user at a specific period.
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let period = 202401u64;
+
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+        CURRENT_PAYLOAD_VERSION,
+    );
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
+
+    // Verify the wrap exists for the minted period.
+    assert!(client.get_wrap(&user, &period).is_some());
+
+    // get_wrap should return None for a different, non-existent period.
+    let nonexistent_period = 202402u64;
+    assert!(client.get_wrap(&user, &nonexistent_period).is_none());
+}
+
+#[test]
 fn test_get_latest_wrap_returns_most_recent() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
