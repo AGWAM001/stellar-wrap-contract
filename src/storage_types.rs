@@ -62,6 +62,18 @@ pub struct WrapRecord {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchWrapItem {
+    pub user: Address,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub payload_version: u32,
+    pub signature: BytesN<64>,
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractHealth {
     /// Whether `initialize()` has been called (admin address is set).
     pub initialized: bool,

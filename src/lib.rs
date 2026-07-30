@@ -107,6 +107,15 @@ impl StellarWrapContract {
         mint::mint_wrap(e, user, period, archetype, data_hash, payload_version, signature);
     }
 
+    pub fn mint_wrap_batch(
+        e: Env,
+        items: soroban_sdk::Vec<storage_types::BatchWrapItem>,
+        aggregated_signature: Option<BytesN<64>>,
+    ) {
+        mint::mint_wrap_batch(e, items, aggregated_signature);
+    }
+
+
     pub fn transition_wrap_state(
         e: Env,
         user: Address,
