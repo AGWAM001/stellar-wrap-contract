@@ -121,6 +121,8 @@ pub fn verify_batch_aggregated_signature(
 
 
 #[cfg(test)]
+#[allow(deprecated)]
+#[allow(clippy::too_many_arguments)]
 mod tests {
     extern crate std;
 
