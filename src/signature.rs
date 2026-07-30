@@ -40,6 +40,7 @@ pub fn construct_mint_payload(
 /// The verification is performed over the canonical mint payload so the
 /// signature is bound to the current contract instance, the target user,
 /// the period, the archetype, and the data hash.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_mint_signature(
     e: &Env,
     admin_pubkey: &BytesN<32>,
@@ -51,7 +52,15 @@ pub fn verify_mint_signature(
     payload_version: u32,
     signature: &BytesN<64>,
 ) -> Result<(), ContractError> {
-    let payload = construct_mint_payload(e, contract_id, user, period, archetype, data_hash, payload_version);
+    let payload = construct_mint_payload(
+        e,
+        contract_id,
+        user,
+        period,
+        archetype,
+        data_hash,
+        payload_version,
+    );
     e.crypto().ed25519_verify(admin_pubkey, &payload, signature);
     Ok(())
 }
@@ -77,7 +86,15 @@ mod tests {
         data_hash: &BytesN<32>,
         payload_version: u32,
     ) -> BytesN<64> {
-        let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash, payload_version);
+        let payload = construct_mint_payload(
+            env,
+            contract,
+            user,
+            period,
+            archetype,
+            data_hash,
+            payload_version,
+        );
 
         let mut out = [0u8; 512];
         let len = payload.len() as usize;
