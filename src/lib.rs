@@ -81,10 +81,6 @@ impl StellarWrapContract {
         mint::transition_wrap_state(e, user, period, next_state);
     }
 
-    pub fn revoke_wrap(e: Env, user: Address, period: u64) {
-        revoke::revoke_wrap(e, user, period);
-    }
-
     pub fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
         queries::get_wrap(e, user, period)
     }
@@ -232,6 +228,10 @@ impl StellarWrapContract {
 
     pub fn decimals(e: Env) -> u32 {
         queries::decimals(e)
+    }
+
+    pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
+        revoke::revoke_wrap(e, user, period, reason_hash);
     }
 }
 

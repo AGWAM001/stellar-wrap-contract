@@ -18,18 +18,14 @@ The codes are defined by the Rust `ContractError` enum in `src/lib.rs`.
 - Reentrancy guard indicates an unexpected execution pattern / guard collision | 1) For admin-only functions (`update_wrap`, `revoke_wrap`, `upgrade`), ensure the call includes admin authorization. 2) For `mint_wrap`, ensure the `user` parameter is the address authorizing the call.
 3) If you are seeing this during retries, check for concurrent calls or repeated invocations that might trip the temporary mint guard. |
 | 4 | `WrapAlreadyExists` | A wrap record already exists for the `(user, period)` pair | Retrying the same mint, or attempting to mint twice for same user+period | 1) Check whether `get_wrap(user, period)` already returns a record. 2) If your UI retries, make the client idempotent. 3) If you intended a new wrap, use a new `period`. |
-| 5 | `WrapNotFound` | A wrap record was not found for the `(user, period)` pair | Revoking/updating a wrap that never existed, or period mismatch | 1) Use `get_wrap(user, period)` to confirm existence. 2) Ensure you are passing the exact same `period` value used when the wrap was minted. 3) If the record may have been revoked, mint again or fetch the correct period. |
-| 6 | `InvalidSignature` | Ed25519 signature verification failed against the contract’s admin public key | - Wrong signature for the payload
+| 5 | `InvalidSignature` | Ed25519 signature verification failed against the contract's admin public key | - Wrong signature for the payload
 - Wrong `contract_id` / payload fields
-- Signature generated for a different user/period/archetype/data_hash | 1) Regenerate the signature using the correct canonical payload (see “Payload & signing notes” below).
+- Signature generated for a different user/period/archetype/data_hash | 1) Regenerate the signature using the correct canonical payload (see "Payload & signing notes" below).
 2) Confirm the signature corresponds to the correct contract instance (`contract_id` / `current_contract_address()`).
 3) Confirm you sign for the correct `user`, `period`, `archetype`, and `data_hash`.
 4) Ensure you pass the 64-byte signature bytes (not base64/hex-decoded to the wrong length). |
-| 7 | `InvalidDataHash` | `data_hash` is all-zero bytes (missing/invalid data) | Passing `0x00…00` as `data_hash` | 1) Compute `data_hash = sha256(original_json_bytes)`.
-2) Ensure you don’t initialize `data_hash` with a zero placeholder.
-3) Validate the off-chain JSON bytes are the same bytes you intend to mint. |
-| 8 | `UserOptedOut` | The user has opted out of receiving future wraps | Calling `mint_wrap` or `mint_campaign_wrap` for an opted-out user | 1) Ask the user to call `opt_in()` to re-enable mints.
-2) Check opt-out status before attempting to mint. |
+| 6 | `InvalidPeriod` | The period value is malformed or out of range | Period does not follow `YYYYMM` format (year 2024–2100, month 01–12) | Ensure `period` uses a valid year (2024–2100) and month (01–12). |
+| 7 | `WrapNotFound` | A wrap record was not found for the `(user, period)` pair | Revoking a wrap that never existed, or period mismatch | 1) Use `get_wrap(user, period)` to confirm existence. 2) Ensure you are passing the exact same `period` value used when the wrap was minted. 3) If the record may have been revoked, mint again or fetch the correct period. |
 
 ---
 
@@ -61,24 +57,19 @@ thread 'main' panicked at 'Error(Contract, #3)'
 thread 'main' panicked at 'Error(Contract, #4)'
 ```
 
-### Code 5 — `WrapNotFound`
+### Code 5 — `InvalidSignature`
 ```text
 thread 'main' panicked at 'Error(Contract, #5)'
 ```
 
-### Code 6 — `InvalidSignature`
+### Code 6 — `InvalidPeriod`
 ```text
 thread 'main' panicked at 'Error(Contract, #6)'
 ```
 
-### Code 7 — `InvalidDataHash`
+### Code 7 — `WrapNotFound`
 ```text
 thread 'main' panicked at 'Error(Contract, #7)'
-```
-
-### Code 8 — `UserOptedOut`
-```text
-thread 'main' panicked at 'Error(Contract, #8)'
 ```
 
 ---
@@ -113,12 +104,12 @@ If your CLI/tooling shows a different wording around an Ed25519 verify failure, 
 ## Troubleshooting tips (fast)
 
 - If you see **`Error(Contract, #3)`**, check that:
-  - You are calling admin-only functions from the **admin address** (or providing the correct authorization).
+  - You are calling admin-only functions (`update_admin`, `revoke_wrap`) from the **admin address** (or providing the correct authorization).
   - The `user` provided to `mint_wrap` is the same address that authorizes the call.
-  - You’re not issuing concurrent/repeated invocations that trip the temporary mint guard.
 - If you see **`Error(Contract, #4)`**, check whether you already minted `(user, period)` with `get_wrap(user, period)`.
-- If you see **`Error(Contract, #5)`**, verify `period` matches the minted period exactly.
-- If you see **`Error(Contract, #8)`**, the user has opted out of receiving wraps. Ask them to call `opt_in()` to re-enable mints.
+- If you see **`Error(Contract, #5)`**, verify your Ed25519 signature and canonical payload encoding.
+- If you see **`Error(Contract, #6)`**, ensure `period` follows `YYYYMM` format (year 2024–2100, month 01–12).
+- If you see **`Error(Contract, #7)`**, the wrap record does not exist. Use `get_wrap(user, period)` to confirm or mint a new wrap.
 
 ---
 
