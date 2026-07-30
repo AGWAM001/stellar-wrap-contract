@@ -263,18 +263,25 @@ mainnet.
 user data at scale.
 
 ### 4. Fuzz Testing
-**Status:** PENDING
+**Status:** OPERATIONAL
 
-Consider adding property-based or fuzz tests:
-- No user should have duplicate periods.
-- Sum of all `WrapCount` values should equal `TotalMints`.
-- Any random 64-byte blob passed as `signature` must be rejected.
+`cargo-fuzz` target `fuzz_mint_wrap` exercises `mint_wrap` with adversarial
+periods, hashes, and signatures. The harness asserts:
+
+- Invalid periods never persist wraps or change balances.
+- Rogue signatures never mint.
+- Valid mints increment balance exactly once.
+- Remints of the same `(user, period)` return `WrapAlreadyExists`.
 
 ```bash
-cargo install cargo-fuzz
-cargo fuzz init
-cargo fuzz run fuzz_target_1
+rustup install nightly
+rustup component add rust-src --toolchain nightly
+cargo install --locked cargo-fuzz
+# or: make fuzz-build && make fuzz FUZZ_SECONDS=30
+cargo +nightly fuzz run --sanitizer=thread --build-std fuzz_mint_wrap -- -max_total_time=30
 ```
+
+See README **Fuzzing `mint_wrap`** for setup details.
 
 ### 5. Upgrade Key Control
 **Status:** OPERATIONAL CONCERN
