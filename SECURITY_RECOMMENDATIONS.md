@@ -25,12 +25,15 @@ against the stored admin public key before minting.
 #### Payload construction (`mint_wrap`)
 
 ```
-payload = XDR(contract_address)
+payload = 0x01
+        ‖ XDR(contract_address)
         ‖ XDR(user)
         ‖ XDR(period)        // u64 — prevents period replay
         ‖ XDR(archetype)
         ‖ XDR(data_hash)     // SHA-256 of off-chain JSON
 ```
+
+The first byte is a payload version field. The contract currently accepts version `1` only, and backend signers must use this version for all new signatures.
 
 Each field is XDR-encoded before concatenation, which provides unambiguous
 length-delimited framing and prevents field-boundary collisions.

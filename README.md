@@ -64,7 +64,18 @@ Returned by `health()`, reports:
 - `update_admin(e: Env, new_admin: Address)`
 - `mint_wrap(e: Env, user: Address, period: u64, archetype: Symbol, data_hash: BytesN<32>, signature: BytesN<64>)`
 - `migrate(e: Env, version: u32)`
+### Mint signature payload versioning
 
+The contract requires mint signatures over a versioned canonical payload. The current payload format is:
+
+- `0x01` — payload version byte
+- `XDR(contract_address)`
+- `XDR(user)`
+- `XDR(period)`
+- `XDR(archetype)`
+- `XDR(data_hash)`
+
+Backend signers must include this version byte in all new mint signatures. This version field allows the contract and backend to evolve safely without ambiguous verification behavior.
 ### Read methods
 
 - `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`  
@@ -141,6 +152,28 @@ soroban contract invoke \
 ```
 
 Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
+
+## Security model
+
+Mint signatures are verified over a canonical payload that binds the request to:
+
+- a domain separator (`stellar-wrap-v1`)
+- the deploying contract instance address
+- the target user address
+- the period (`YYYYMM`)
+- the archetype symbol
+- the data hash
+
+The payload is constructed by concatenating the XDR-encoded fields in the order above. Off-chain signers should use the same byte layout when creating signatures:
+
+1. encode the domain separator as raw bytes
+2. append the XDR encoding of the contract address
+3. append the XDR encoding of the user address
+4. append the XDR encoding of the period as `u64`
+5. append the XDR encoding of the archetype symbol
+6. append the XDR encoding of the 32-byte data hash
+
+This ensures that a signature for one contract instance cannot be replayed against another deployment with the same admin key.
 
 ## Event schema
 
@@ -361,6 +394,9 @@ storage layout must ship as a numbered migration:
 - Additive changes (new `DataKey` variants, new methods) need no migration; changing or removing
   the shape of an existing key does, and the new code must bump the migration version.
 - Call `migrate` in the same transaction batch as the upgrade, and verify with `migration_version()`.
+## Documentation
+
+- [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, and test vectors required by backend signing services (issue #213)
 
 ## Development
 
@@ -437,3 +473,20 @@ Ensure `wasm32-unknown-unknown` is the active target and no host-specific native
 ## Mainnet deployment
 
 Before deploying to mainnet, review the release checklist in [MAINNET_RELEASE_CHECKLIST.md](MAINNET_RELEASE_CHECKLIST.md). It covers tests, optimized builds, release artifact hash verification, signer backup, initialization, and rollback guidance.
+### Gas Analysis
+
+The contract includes gas analysis tests that measure CPU instructions and memory usage
+of mint operations. These tests always run assertions on resource bounds, but detailed
+budget tables are suppressed during normal test runs to keep CI output clean.
+
+To run tests with full gas budget reporting:
+
+```bash
+make test-gas-report
+# or
+SOROBAN_GAS_REPORT=1 cargo test -- --nocapture
+```
+
+> **Note:** The Soroban test framework automatically creates snapshot files under
+> `test_snapshots/` during test execution. These are already in `.gitignore` and
+> can be cleaned up with `make clean-snapshots`.

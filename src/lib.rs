@@ -20,10 +20,12 @@ extern crate std;
 use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
+mod alias;
 mod errors;
 mod mint;
 mod queries;
 mod revoke;
+mod signature;
 mod storage_types;
 
 pub use errors::ContractError;
@@ -79,10 +81,6 @@ impl StellarWrapContract {
         next_state: WrapState,
     ) {
         mint::transition_wrap_state(e, user, period, next_state);
-    }
-
-    pub fn revoke_wrap(e: Env, user: Address, period: u64) {
-        revoke::revoke_wrap(e, user, period);
     }
 
     pub fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
@@ -222,6 +220,20 @@ impl StellarWrapContract {
         queries::health(e)
     }
 
+    /// Set or update the caller's alias hash.
+    ///
+    /// Only the `user` themselves can call this — `require_auth` is enforced
+    /// inside the alias module. The hash is stored as opaque 32-byte data so
+    /// no raw personal information ever touches the chain.
+    pub fn set_alias_hash(e: Env, user: Address, alias_hash: BytesN<32>) {
+        alias::set_alias_hash(e, user, alias_hash);
+    }
+
+    /// Return the alias hash for `user`, or `None` if one has not been set.
+    pub fn get_alias_hash(e: Env, user: Address) -> Option<BytesN<32>> {
+        alias::get_alias_hash(e, user)
+    }
+
     pub fn name(e: Env) -> String {
         queries::name(e)
     }
@@ -232,6 +244,14 @@ impl StellarWrapContract {
 
     pub fn decimals(e: Env) -> u32 {
         queries::decimals(e)
+    }
+
+    pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
+        revoke::revoke_wrap(e, user, period, reason_hash);
+    }
+
+    pub fn total_revoked(e: Env) -> u64 {
+        queries::total_revoked(e)
     }
 }
 

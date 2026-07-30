@@ -5,6 +5,8 @@ extern crate std;
 use super::*;
 use crate::test_utils::sign_payload;
 use ed25519_dalek::SigningKey;
+use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
+use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events},
@@ -174,6 +176,59 @@ fn test_balance_of_and_count() {
     client.mint_wrap(&user, &2022, &archetype, &hash, &sig2);
 
     assert_eq!(client.balance_of(&user), 2);
+}
+
+#[test]
+fn test_revoke_wrap_increments_total_revoked() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[4u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    assert_eq!(client.total_revoked(), 0);
+
+    client.revoke_wrap(&user, &period);
+
+    assert_eq!(client.total_revoked(), 1);
+    assert_eq!(client.balance_of(&user), 0);
+    assert!(client.get_wrap(&user, &period).is_none());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_revoke_wrap_nonexistent_wrap_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    client.revoke_wrap(&user, &202401);
 }
 
 #[test]
@@ -1517,6 +1572,20 @@ fn test_mint_wrap_non_zero_hash_succeeds() {
 
 #[test]
 fn test_mint_wrap_max_hash_succeeds() {
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_upgrade_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let dummy_wasm_hash = BytesN::from_array(&env, &[0xAAu8; 32]);
+    client.upgrade(&dummy_wasm_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_unauthorized_upgrade_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1572,6 +1641,12 @@ fn test_mint_wrap_max_hash_succeeds() {
 #[test]
 #[should_panic(expected = "Error(Contract, #3)")]
 fn test_upgrade_requires_admin_auth() {
+// ---------------------------------------------------------------------------
+// Alias hash tests (#288)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_set_and_get_alias_hash() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1606,12 +1681,17 @@ fn sign_update_payload(
 
 #[test]
 fn test_update_wrap_succeeds_and_preserves_timestamp() {
+// ── Revocation Tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_revoke_wrap_success() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[1u8; 32]);
     let signing_key = SigningKey::from_bytes(&[30u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[15u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -1629,6 +1709,10 @@ fn test_update_wrap_succeeds_and_preserves_timestamp() {
     let hash1 = BytesN::from_array(&env, &[41u8; 32]);
 
     let sig1 = sign_payload(
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
         &env,
         &signing_key,
         &contract_id,
@@ -1666,11 +1750,27 @@ fn test_update_wrap_succeeds_and_preserves_timestamp() {
 
 #[test]
 fn test_update_wrap_emits_update_event() {
+        &hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    assert_eq!(client.balance_of(&user), 1);
+    assert!(client.get_wrap(&user, &period).is_some());
+
+    let reason_hash = BytesN::from_array(&env, &[1u8; 32]);
+    client.revoke_wrap(&user, &period, &reason_hash);
+
+    assert!(client.get_wrap(&user, &period).is_none());
+    assert_eq!(client.balance_of(&user), 0);
+}
+
+#[test]
+fn test_revoke_wrap_emits_event() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[31u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[16u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -1682,6 +1782,10 @@ fn test_update_wrap_emits_update_event() {
     let archetype = symbol_short!("arch");
     let hash1 = BytesN::from_array(&env, &[41u8; 32]);
     let sig1 = sign_payload(
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
         &env,
         &signing_key,
         &contract_id,
@@ -1802,6 +1906,31 @@ fn test_update_wrap_requires_admin_auth() {
 #[test]
 #[should_panic]
 fn test_update_wrap_zero_hash_rejected() {
+        &hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+
+    let reason_hash = BytesN::from_array(&env, &[0xAAu8; 32]);
+    client.revoke_wrap(&user, &period, &reason_hash);
+
+    let events = env.events().all();
+    let last_event = events.last().expect("no events found");
+    let (_, topics, data) = last_event;
+
+    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_reason: BytesN<32> = data.try_into_val(&env).unwrap();
+
+    assert_eq!(event_topic, symbol_short!("revoke"));
+    assert_eq!(event_user, user);
+    assert_eq!(event_period, period);
+    assert_eq!(event_reason, reason_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_revoke_wrap_not_found_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1875,6 +2004,20 @@ fn test_fsm_transition_nonexistent_wrap_fails() {
 #[test]
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn test_update_admin_pubkey_requires_admin_auth() {
+    let user = Address::generate(&env);
+    let alias_hash = BytesN::from_array(&env, &[0xabu8; 32]);
+
+    // No hash set yet
+    assert!(client.get_alias_hash(&user).is_none());
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user, &alias_hash);
+
+    assert_eq!(client.get_alias_hash(&user).unwrap(), alias_hash);
+}
+
+#[test]
+fn test_update_alias_hash() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1936,11 +2079,57 @@ fn test_metadata_ttl_extended_on_new_mint() {
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")]
 fn test_update_admin_pubkey_before_init_fails() {
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+    client.revoke_wrap(&user, &202401, &reason_hash);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_revoke_wrap_before_init_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+    client.revoke_wrap(&user, &202401, &reason_hash);
+}
+
+#[test]
+fn test_revoke_latest_period_clears_latest() {
+    let pubkey = BytesN::from_array(&env, &[2u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let user = Address::generate(&env);
+    let hash_v1 = BytesN::from_array(&env, &[0x11u8; 32]);
+    let hash_v2 = BytesN::from_array(&env, &[0x22u8; 32]);
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user, &hash_v1);
+    assert_eq!(client.get_alias_hash(&user).unwrap(), hash_v1);
+
+    // Overwrite with a new hash
+    client.set_alias_hash(&user, &hash_v2);
+    assert_eq!(client.get_alias_hash(&user).unwrap(), hash_v2);
+}
+
+#[test]
+fn test_alias_hash_is_per_user() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[50u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[17u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -1985,11 +2174,38 @@ fn test_old_wrap_preserved_on_new_mint() {
 
 #[test]
 fn test_update_admin_pubkey_emits_event() {
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+
+    let sig1 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202401, &archetype, &hash1,
+    );
+    let sig2 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202402, &archetype, &hash2,
+    );
+
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &202402, &archetype, &hash2, &sig2);
+
+    let latest = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest.period, 202402);
+
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &202402, &reason_hash);
+
+    // LatestPeriod was cleared; get_latest_wrap returns None
+    assert!(client.get_latest_wrap(&user).is_none());
+    assert_eq!(client.balance_of(&user), 1);
+}
+
+#[test]
+fn test_revoke_non_latest_preserves_latest() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[51u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[18u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -2025,11 +2241,57 @@ fn test_update_admin_pubkey_emits_event() {
 
 #[test]
 fn test_renew_all_ttls_extends_metadata() {
+    let sig1 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202401, &archetype, &hash1,
+    );
+    let sig2 = sign_payload(
+        &env, &signing_key, &contract_id, &user, 202403, &archetype, &hash2,
+    );
+
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &sig1);
+    client.mint_wrap(&user, &202403, &archetype, &hash2, &sig2);
+
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &202401, &reason_hash);
+
+    // Latest period (202403) should still be retrievable
+    let latest = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest.period, 202403);
+    assert_eq!(client.balance_of(&user), 1);
+}
+
+#[test]
+fn test_remint_after_revoke_succeeds() {
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[3u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let hash_a = BytesN::from_array(&env, &[0xaau8; 32]);
+    let hash_b = BytesN::from_array(&env, &[0xbbu8; 32]);
+
+    env.mock_all_auths();
+    client.set_alias_hash(&user_a, &hash_a);
+    client.set_alias_hash(&user_b, &hash_b);
+
+    assert_eq!(client.get_alias_hash(&user_a).unwrap(), hash_a);
+    assert_eq!(client.get_alias_hash(&user_b).unwrap(), hash_b);
+    // Ensure they are distinct
+    assert_ne!(
+        client.get_alias_hash(&user_a).unwrap(),
+        client.get_alias_hash(&user_b).unwrap()
+    );
+}
+
+#[test]
+fn test_get_alias_hash_returns_none_for_unknown_user() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[52u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[19u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
@@ -2053,16 +2315,45 @@ fn test_renew_all_ttls_extends_metadata() {
     // Metadata still accessible after renewal
     assert_eq!(client.balance_of(&user), 1);
     assert!(client.get_latest_wrap(&user).is_some());
+    let unknown_user = Address::generate(&env);
+    assert!(client.get_alias_hash(&unknown_user).is_none());
 }
 
 #[test]
 #[should_panic]
 fn test_renew_all_ttls_requires_admin_auth() {
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[10u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[20u8; 32]);
+    let period = 202401u64;
+
+    let sig1 = sign_payload(
+        &env, &signing_key, &contract_id, &user, period, &archetype, &hash1,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash1, &sig1);
+
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &period, &reason_hash);
+
+    // Should be able to mint a new wrap for the same period after revocation
+    let sig2 = sign_payload(
+        &env, &signing_key, &contract_id, &user, period, &archetype, &hash2,
+    );
+    client.mint_wrap(&user, &period, &archetype, &hash2, &sig2);
+
+    let wrap = client.get_wrap(&user, &period).unwrap();
+    assert_eq!(wrap.data_hash, hash2);
+    assert_eq!(client.balance_of(&user), 1);
+}
+
+#[test]
+fn test_revoke_with_zero_reason_hash() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[53u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[20u8; 32]);
     let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
     let admin = Address::generate(&env);
     let user = Address::generate(&env);

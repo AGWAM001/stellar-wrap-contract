@@ -3,6 +3,9 @@
 use super::*;
 use crate::test_utils::sign_payload;
 use ed25519_dalek::SigningKey;
+use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
+use crate::signature::construct_mint_payload;
+use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Ledger},
@@ -13,6 +16,7 @@ use soroban_sdk::{
 /// Ensures that a valid signature cannot be reused for the same period
     xdr::ToXdr,
     Address, Bytes, BytesN, Env,
+    Address, Bytes, BytesN, Env, Symbol,
 };
 
 fn sign_payload(
@@ -25,11 +29,13 @@ fn sign_payload(
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
     let mut payload = Bytes::new(env);
+    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
     payload.append(&contract.to_xdr(env));
     payload.append(&user.clone().to_xdr(env));
     payload.append(&period.to_xdr(env));
     payload.append(&archetype.clone().to_xdr(env));
     payload.append(&data_hash.clone().to_xdr(env));
+    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash);
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;
@@ -291,7 +297,6 @@ fn test_cross_contract_replay_protection() {
         &data_hash,
     );
 
-    // Mint successfully on V1
     client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
 
     let wrap_v1 = client_v1.get_wrap(&user, &period);
@@ -314,6 +319,24 @@ fn test_cross_contract_replay_protection() {
 
     assert!(client_v1.get_wrap(&user, &period).is_some());
     assert!(client_v2.get_wrap(&user, &period).is_some());
+    let payload_v1 =
+        construct_mint_payload(&env, &contract_v1, &user, period, &archetype, &data_hash);
+    let payload_v2 =
+        construct_mint_payload(&env, &contract_v2, &user, period, &archetype, &data_hash);
+    assert_ne!(
+        payload_v1, payload_v2,
+        "Payloads should differ across contract instances"
+    );
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
+    }));
+
+    assert!(
+        result.is_err(),
+        "A signature from V1 should not be replayable on V2"
+    );
+    assert!(client_v2.get_wrap(&user, &period).is_none());
 }
 
 #[test]
@@ -352,6 +375,10 @@ fn test_gas_analysis_mint_operation() {
     client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 
     env.budget().print();
+    // Get budget consumption (only when gas reporting is explicitly enabled)
+    if std::env::var("SOROBAN_GAS_REPORT").is_ok() {
+        env.budget().print();
+    }
 
     let cpu_insns = env.budget().cpu_instruction_cost();
     let mem_bytes = env.budget().memory_bytes_cost();
@@ -551,4 +578,26 @@ fn test_non_admin_cannot_mint() {
 
     // This should panic because attacker is not authorized
     client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+}
+
+/// Test 11: Revocation - Non-admin cannot revoke wraps
+/// Only the admin should be able to revoke wrap records.
+/// Without any mocked auth, admin.require_auth() will panic.
+#[test]
+#[should_panic]
+fn test_non_admin_cannot_revoke() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+
+    // Do NOT mock any auths — admin.require_auth() should panic
+    let reason_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &202512, &reason_hash);
 }

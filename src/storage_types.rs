@@ -92,4 +92,8 @@ pub enum DataKey {
     Paused,
     /// Stores the total number of successful wrap mints across all users.
     TotalWrapCount,
+    /// Stores the total number of wrap records revoked on-chain.
+    TotalRevoked,
+    /// Stores a user-controlled 32-byte alias hash for privacy-preserving profile display.
+    AliasHash(Address),
 }
