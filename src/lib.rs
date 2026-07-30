@@ -42,6 +42,7 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+
     pub fn unpause(e: Env) {
         admin::unpause(e);
     }
@@ -97,6 +98,10 @@ impl StellarWrapContract {
 
     pub fn balance_of(e: Env, user: Address) -> i128 {
         queries::balance_of(e, user)
+    }
+
+    pub fn total_wrap_count(e: Env) -> u32 {
+        queries::total_wrap_count(e)
     }
 
     pub fn verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool {

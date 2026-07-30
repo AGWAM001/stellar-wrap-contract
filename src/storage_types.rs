@@ -90,4 +90,6 @@ pub enum DataKey {
     UserPeriods(Address),
     /// Stores the paused state of the contract.
     Paused,
+    /// Stores the total number of successful wrap mints across all users.
+    TotalWrapCount,
 }

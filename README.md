@@ -434,3 +434,6 @@ The Soroban SDK often tracks Rust nightly or a specific stable release. If you s
 
 **WASM build fails with link errors**
 Ensure `wasm32-unknown-unknown` is the active target and no host-specific native dependencies leak in. The `Dockerfile` provides a fully isolated environment for reproducible WASM builds.
+## Mainnet deployment
+
+Before deploying to mainnet, review the release checklist in [MAINNET_RELEASE_CHECKLIST.md](MAINNET_RELEASE_CHECKLIST.md). It covers tests, optimized builds, release artifact hash verification, signer backup, initialization, and rollback guidance.
