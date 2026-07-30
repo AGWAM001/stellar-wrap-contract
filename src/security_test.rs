@@ -19,6 +19,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env,
     Address, Bytes, BytesN, Env, Symbol,
 };
+use crate::mint::CURRENT_PAYLOAD_VERSION;
 
 fn sign_payload(
     env: &Env,
@@ -28,9 +29,11 @@ fn sign_payload(
     period: u64,
     archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
 ) -> BytesN<64> {
     let mut payload = Bytes::new(env);
     payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
+    payload.append(&payload_version.to_xdr(env));
     payload.append(&contract.to_xdr(env));
     payload.append(&user.clone().to_xdr(env));
     payload.append(&period.to_xdr(env));
@@ -73,17 +76,18 @@ fn test_replay_attack_same_period_fails() {
         period,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     // First mint - should succeed
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let wrap = client.get_wrap(&user, &period);
     assert!(wrap.is_some(), "First mint should succeed");
 
     // Replay attack: Try to mint again with the exact same parameters
     // This should PANIC with WrapAlreadyExists error (#4)
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 }
 
 #[test]
@@ -114,10 +118,11 @@ fn test_replay_attack_different_hash_same_period_fails() {
         period,
         &archetype,
         &data_hash_1,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     // First mint - should succeed
-    client.mint_wrap(&user, &period, &archetype, &data_hash_1, &signature_1);
+    client.mint_wrap(&user, &period, &archetype, &data_hash_1, &CURRENT_PAYLOAD_VERSION, &signature_1);
 
     let signature_2 = sign_payload(
         &env,
@@ -127,11 +132,12 @@ fn test_replay_attack_different_hash_same_period_fails() {
         period,
         &archetype,
         &data_hash_2,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     // Try to mint again for the same period with a different hash
     // This should still fail - period is already used
-    client.mint_wrap(&user, &period, &archetype, &data_hash_2, &signature_2);
+    client.mint_wrap(&user, &period, &archetype, &data_hash_2, &CURRENT_PAYLOAD_VERSION, &signature_2);
 }
 
 #[test]
@@ -165,6 +171,7 @@ fn test_multiple_periods_for_same_user_success() {
         period_1,
         &archetype,
         &data_hash_1,
+        CURRENT_PAYLOAD_VERSION,
     );
     let signature_2 = sign_payload(
         &env,
@@ -174,6 +181,7 @@ fn test_multiple_periods_for_same_user_success() {
         period_2,
         &archetype,
         &data_hash_2,
+        CURRENT_PAYLOAD_VERSION,
     );
     let signature_3 = sign_payload(
         &env,
@@ -183,12 +191,13 @@ fn test_multiple_periods_for_same_user_success() {
         period_3,
         &archetype,
         &data_hash_3,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     // All three should succeed
-    client.mint_wrap(&user, &period_1, &archetype, &data_hash_1, &signature_1);
-    client.mint_wrap(&user, &period_2, &archetype, &data_hash_2, &signature_2);
-    client.mint_wrap(&user, &period_3, &archetype, &data_hash_3, &signature_3);
+    client.mint_wrap(&user, &period_1, &archetype, &data_hash_1, &CURRENT_PAYLOAD_VERSION, &signature_1);
+    client.mint_wrap(&user, &period_2, &archetype, &data_hash_2, &CURRENT_PAYLOAD_VERSION, &signature_2);
+    client.mint_wrap(&user, &period_3, &archetype, &data_hash_3, &CURRENT_PAYLOAD_VERSION, &signature_3);
 
     assert!(client.get_wrap(&user, &period_1).is_some());
     assert!(client.get_wrap(&user, &period_2).is_some());
@@ -222,10 +231,11 @@ fn test_signature_cannot_be_stolen_by_another_user() {
         period,
         &archetype,
         &data_hash_for_a,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     // User A mints successfully
-    client.mint_wrap(&user_a, &period, &archetype, &data_hash_for_a, &signature_a);
+    client.mint_wrap(&user_a, &period, &archetype, &data_hash_for_a, &CURRENT_PAYLOAD_VERSION, &signature_a);
 
     let wrap_a = client.get_wrap(&user_a, &period);
     assert!(wrap_a.is_some(), "User A should have the wrap");
@@ -241,6 +251,7 @@ fn test_signature_cannot_be_stolen_by_another_user() {
         period_b,
         &archetype,
         &data_hash_for_b,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     client.mint_wrap(
@@ -248,6 +259,7 @@ fn test_signature_cannot_be_stolen_by_another_user() {
         &period_b,
         &archetype,
         &data_hash_for_b,
+        &CURRENT_PAYLOAD_VERSION,
         &signature_b,
     );
 
@@ -296,9 +308,12 @@ fn test_cross_contract_replay_protection() {
         period,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
+    // Mint successfully on V1
+    client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_v1);
 
     let wrap_v1 = client_v1.get_wrap(&user, &period);
     assert!(wrap_v1.is_some(), "Wrap should exist on contract V1");
@@ -311,9 +326,10 @@ fn test_cross_contract_replay_protection() {
         period,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
-    client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v2);
+    client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_v2);
 
     let wrap_v2 = client_v2.get_wrap(&user, &period);
     assert!(wrap_v2.is_some(), "Wrap should exist on contract V2");
@@ -368,12 +384,13 @@ fn test_gas_analysis_mint_operation() {
         period,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     env.budget().reset_default();
 
     // Perform the mint operation
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     env.budget().print();
     // Get budget consumption (only when gas reporting is explicitly enabled)
@@ -437,9 +454,10 @@ fn test_gas_analysis_multiple_mints() {
             period,
             &archetype,
             &data_hash,
+            CURRENT_PAYLOAD_VERSION,
         );
 
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
     }
 
     let cpu_insns = env.budget().cpu_instruction_cost();
@@ -481,9 +499,10 @@ fn test_timestamp_is_from_ledger_not_user() {
         period,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let wrap = client.get_wrap(&user, &period).unwrap();
 
@@ -502,9 +521,10 @@ fn test_timestamp_is_from_ledger_not_user() {
         period_2,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period_2, &archetype, &data_hash, &signature_2);
+    client.mint_wrap(&user, &period_2, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_2);
 
     let wrap_2 = client.get_wrap(&user, &period_2).unwrap();
     assert_eq!(
@@ -540,9 +560,10 @@ fn test_edge_case_long_symbols() {
         period,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 
     let wrap = client.get_wrap(&user, &period);
     assert!(wrap.is_some(), "Should handle reasonably long symbols");
@@ -575,10 +596,11 @@ fn test_non_admin_cannot_mint() {
         period,
         &archetype,
         &data_hash,
+        CURRENT_PAYLOAD_VERSION,
     );
 
     // This should panic because attacker is not authorized
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
 }
 
 /// Test 11: Revocation - Non-admin cannot revoke wraps

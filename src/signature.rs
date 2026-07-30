@@ -22,9 +22,11 @@ pub fn construct_mint_payload(
     period: u64,
     archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
 ) -> Bytes {
     let mut payload = Bytes::new(e);
     payload.append(&Bytes::from_array(e, MINT_DOMAIN_SEPARATOR));
+    payload.append(&payload_version.to_xdr(e));
     payload.append(&contract_id.to_xdr(e));
     payload.append(&user.clone().to_xdr(e));
     payload.append(&period.to_xdr(e));
@@ -46,9 +48,10 @@ pub fn verify_mint_signature(
     period: u64,
     archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
     signature: &BytesN<64>,
 ) -> Result<(), ContractError> {
-    let payload = construct_mint_payload(e, contract_id, user, period, archetype, data_hash);
+    let payload = construct_mint_payload(e, contract_id, user, period, archetype, data_hash, payload_version);
     e.crypto().ed25519_verify(admin_pubkey, &payload, signature);
     Ok(())
 }
@@ -72,8 +75,9 @@ mod tests {
         period: u64,
         archetype: &Symbol,
         data_hash: &BytesN<32>,
+        payload_version: u32,
     ) -> BytesN<64> {
-        let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash);
+        let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash, payload_version);
 
         let mut out = [0u8; 512];
         let len = payload.len() as usize;
@@ -93,10 +97,11 @@ mod tests {
         let period = 202512u64;
 
         let payload =
-            construct_mint_payload(&env, &contract_id, &user, period, &archetype, &data_hash);
+            construct_mint_payload(&env, &contract_id, &user, period, &archetype, &data_hash, 1);
 
         let mut expected = Bytes::new(&env);
         expected.append(&Bytes::from_array(&env, MINT_DOMAIN_SEPARATOR));
+        expected.append(&1u32.to_xdr(&env));
         expected.append(&contract_id.to_xdr(&env));
         expected.append(&user.clone().to_xdr(&env));
         expected.append(&period.to_xdr(&env));
@@ -125,6 +130,7 @@ mod tests {
             period,
             &archetype,
             &data_hash,
+            1,
         );
 
         assert!(verify_mint_signature(
@@ -135,6 +141,7 @@ mod tests {
             period,
             &archetype,
             &data_hash,
+            1,
             &signature,
         )
         .is_ok());
@@ -162,6 +169,7 @@ mod tests {
                 period,
                 &archetype,
                 &data_hash,
+                1,
                 &invalid_signature,
             )
             .unwrap();
@@ -190,6 +198,7 @@ mod tests {
             period,
             &archetype,
             &data_hash,
+            1,
         );
 
         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -201,6 +210,7 @@ mod tests {
                 period,
                 &archetype,
                 &data_hash,
+                1,
                 &wrong_signature,
             )
             .unwrap();

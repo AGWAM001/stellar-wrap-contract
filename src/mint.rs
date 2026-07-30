@@ -4,6 +4,7 @@ use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
+pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 
 fn validate_period(e: &Env, period: u64) {
     let year = period / 100;
@@ -11,6 +12,12 @@ fn validate_period(e: &Env, period: u64) {
 
     if !(2024..=2100).contains(&year) || !(1..=12).contains(&month) {
         panic_with_error!(e, ContractError::InvalidPeriod);
+    }
+}
+
+fn validate_payload_version(e: &Env, version: u32) {
+    if version != CURRENT_PAYLOAD_VERSION {
+        panic_with_error!(e, ContractError::InvalidSignature);
     }
 }
 
@@ -22,16 +29,19 @@ fn get_admin_pubkey(e: &Env) -> BytesN<32> {
 }
 
 
+
 pub(crate) fn mint_wrap(
     e: Env,
     user: Address,
     period: u64,
     archetype: Symbol,
     data_hash: BytesN<32>,
+    payload_version: u32,
     signature: BytesN<64>,
 ) {
     user.require_auth();
     validate_period(&e, period);
+    validate_payload_version(&e, payload_version);
 
     let admin_pubkey = get_admin_pubkey(&e);
     let _ = verify_mint_signature(
@@ -42,6 +52,7 @@ pub(crate) fn mint_wrap(
         period,
         &archetype,
         &data_hash,
+        payload_version,
         &signature,
     );
 
