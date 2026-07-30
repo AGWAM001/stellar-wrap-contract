@@ -956,36 +956,6 @@ fn test_update_admin_before_init_fails() {
     client.update_admin(&new_admin);
 }
 
-#[test]
-fn test_get_admin_before_init_returns_none() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
-    let client = StellarWrapContractClient::new(&env, &contract_id);
-
-    assert!(client.get_admin().is_none());
-}
-
-#[test]
-fn test_migrate_applies_once_per_version() {
-fn test_get_mint_timestamp_exists() {
-/// Verifies that `get_wrap` can be safely called before the contract is initialized.
-/// 
-/// Before initialization, no wrap records exist in persistent storage.
-/// This test confirms that `get_wrap` returns `None` rather than panicking,
-/// allowing client developers to query wrap state without requiring an
-/// initialization guard.
-#[test]
-fn test_get_wrap_returns_none_before_initialization() {
-// ─── Issue #26: instance storage TTL tests ──────────────────────────────────
-
-#[test]
-fn test_instance_ttl_extended_on_mint() {
-    // Verifies that mint_wrap calls extend_ttl on instance storage,
-    // keeping admin/pubkey/schema accessible after many ledgers.
-// ─── Issue #25: update_admin_pubkey tests ───────────────────────────────────
-
-#[test]
-fn test_update_admin_pubkey_success() {
 /// Issue #241: reminting after revoke must replace the archetype and emit both events.
 #[test]
 fn test_remint_after_revoke_updates_archetype() {
