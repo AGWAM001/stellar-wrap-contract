@@ -128,25 +128,32 @@ pub(crate) fn get_admin(e: Env) -> Option<Address> {
 
 pub(crate) fn total_revoked(e: Env) -> u64 {
     e.storage()
-        .instance()
+        .temporary()
         .get::<_, u64>(&DataKey::TotalRevoked)
         .unwrap_or(0)
 }
 
 pub(crate) fn name(e: Env) -> String {
     e.storage()
-        .instance()
+        .temporary()
         .get(&DataKey::Name)
         .unwrap_or_else(|| String::from_str(&e, "Stellar Wrap Registry"))
 }
 
 pub(crate) fn symbol(e: Env) -> String {
     e.storage()
-        .instance()
+        .temporary()
         .get(&DataKey::Symbol)
         .unwrap_or_else(|| String::from_str(&e, "WRAP"))
 }
 
 pub(crate) fn decimals(_e: Env) -> u32 {
     0
+}
+
+pub(crate) fn contract_version(e: Env) -> u32 {
+    e.storage()
+        .instance()
+        .get(&DataKey::ContractVersion)
+        .unwrap_or(0)
 }
