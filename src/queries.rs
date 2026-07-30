@@ -89,6 +89,15 @@ pub(crate) fn get_admin_pubkey(e: Env) -> Option<BytesN<32>> {
     e.storage().instance().get(&DataKey::AdminPubKey)
 }
 
+/// Return the contract semantic version string (`MAJOR.MINOR.PATCH`).
+///
+/// Keep this in sync with `Cargo.toml` package version. Bump it in the same
+/// release that ships a WASM upgrade so clients can detect which interface they
+/// are talking to after `upgrade()`.
+pub(crate) fn version(e: Env) -> String {
+    String::from_str(&e, "0.1.0")
+}
+
 pub(crate) fn total_revoked(e: Env) -> u64 {
     e.storage()
         .instance()

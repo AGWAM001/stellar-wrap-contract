@@ -144,3 +144,12 @@ fn test_get_admin_pubkey_before_and_after_init() {
     assert_eq!(client.get_admin_pubkey().unwrap(), pubkey);
 }
 
+#[test]
+fn test_version_returns_semver() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.version(), String::from_str(&env, "0.1.0"));
+}
+
