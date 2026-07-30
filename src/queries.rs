@@ -103,3 +103,10 @@ pub(crate) fn symbol(e: Env) -> String {
 pub(crate) fn decimals(_e: Env) -> u32 {
     0
 }
+
+pub(crate) fn contract_version(e: Env) -> u32 {
+    e.storage()
+        .instance()
+        .get(&DataKey::ContractVersion)
+        .unwrap_or(0)
+}

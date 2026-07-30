@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-.PHONY: build test fmt fmt-check lint clean deploy-testnet wasm-build docker-build docker-build-verify coverage
-=======
-.PHONY: build test fmt fmt-check lint doc clean deploy-testnet wasm-build docker-build docker-build-verify
->>>>>>> ci/add-cargo-doc-check
+.PHONY: build test fmt fmt-check lint doc clean deploy-testnet wasm-build docker-build docker-build-verify coverage
 
 # ── Build ────────────────────────────────────────────────────────────────────
 

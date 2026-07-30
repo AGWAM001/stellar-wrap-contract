@@ -85,9 +85,21 @@ pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    // Emit audit event with the requested WASM hash before performing the upgrade
+
+    // Bump the contract version to track upgrade history
+    let next_version: u32 = e
+        .storage()
+        .instance()
+        .get(&DataKey::ContractVersion)
+        .unwrap_or(0)
+        + 1;
+    e.storage()
+        .instance()
+        .set(&DataKey::ContractVersion, &next_version);
+
+    // Emit audit event with the requested WASM hash and new version
     e.events()
-        .publish((symbol_short!("upgrade"),), new_wasm_hash.clone());
+        .publish((symbol_short!("upgrade"), next_version), new_wasm_hash.clone());
 
     // Update the contract WASM with the provided hash
     e.deployer().update_current_contract_wasm(new_wasm_hash);

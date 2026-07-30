@@ -124,4 +124,6 @@ pub enum DataKey {
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
+    /// Tracks the contract version number, incremented on each `upgrade`.
+    ContractVersion,
 }
