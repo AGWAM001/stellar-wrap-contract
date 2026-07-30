@@ -1,4 +1,8 @@
-.PHONY: build test fmt fmt-check lint clean deploy-testnet wasm-build docker-build docker-build-verify
+<<<<<<< HEAD
+.PHONY: build test fmt fmt-check lint clean deploy-testnet wasm-build docker-build docker-build-verify coverage
+=======
+.PHONY: build test fmt fmt-check lint doc clean deploy-testnet wasm-build docker-build docker-build-verify
+>>>>>>> ci/add-cargo-doc-check
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +27,14 @@ test:
 test-verbose:
 	cargo test -- --nocapture --test-threads=1
 
+## coverage: Run cargo-tarpaulin and generate HTML + XML reports in coverage/
+##   Requires cargo-tarpaulin: cargo install cargo-tarpaulin --locked
+##   Exits non-zero if line coverage falls below the fail-under threshold in
+##   tarpaulin.toml (currently 90%).
+coverage:
+	cargo tarpaulin --config tarpaulin.toml
+	@echo "Coverage report written to coverage/tarpaulin-report.html"
+
 # ── Format ───────────────────────────────────────────────────────────────────
 
 ## fmt: Auto-format source code with rustfmt
@@ -38,6 +50,10 @@ fmt-check:
 ## lint: Run clippy and treat all warnings as errors
 lint:
 	cargo clippy -- -D warnings
+
+## doc: Build contract documentation and treat warnings as errors
+doc:
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 

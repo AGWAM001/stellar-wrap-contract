@@ -1,4 +1,4 @@
-use soroban_sdk::{panic_with_error, Address, BytesN, Env};
+use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
 use crate::{ContractError, DataKey};
 
@@ -25,6 +25,13 @@ pub(crate) fn update_admin(e: Env, new_admin: Address) {
     e.storage().instance().set(&DataKey::Admin, &new_admin);
 }
 
+pub(crate) fn unpause(e: Env) {
+    read_admin(&e).require_auth();
+    e.storage().instance().set(&DataKey::Paused, &false);
+    e.events()
+        .publish((symbol_short!("pause"), symbol_short!("status")), false);
+}
+
 /// Marks a storage migration as applied. A version can only be applied once and
 /// versions must move forward, so an upgrade shipping a migration cannot corrupt
 /// storage by replaying it.
@@ -46,4 +53,21 @@ pub(crate) fn migration_version(e: &Env) -> u32 {
         .instance()
         .get(&DataKey::MigrationVersion)
         .unwrap_or(0)
+}
+
+pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+    let current_admin: Address = e
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
+
+    current_admin.require_auth();
+
+    // Emit audit event with the requested WASM hash before performing the upgrade
+    e.events()
+        .publish((symbol_short!("upgrade"),), new_wasm_hash.clone());
+
+    // Update the contract WASM with the provided hash
+    e.deployer().update_current_contract_wasm(new_wasm_hash);
 }
