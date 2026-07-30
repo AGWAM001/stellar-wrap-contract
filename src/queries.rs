@@ -1,5 +1,5 @@
 use crate::{ContractHealth, DataKey, WrapRecord};
-use soroban_sdk::{Address, Bytes, BytesN, Env, String};
+use soroban_sdk::{Address, Bytes, BytesN, Env};
 
 pub(crate) fn get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord> {
     e.storage().persistent().get(&DataKey::Wrap(user, period))
@@ -86,20 +86,3 @@ pub(crate) fn total_revoked(e: Env) -> u64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn name(e: Env) -> String {
-    e.storage()
-        .instance()
-        .get(&DataKey::Name)
-        .unwrap_or_else(|| String::from_str(&e, "Stellar Wrap Registry"))
-}
-
-pub(crate) fn symbol(e: Env) -> String {
-    e.storage()
-        .instance()
-        .get(&DataKey::Symbol)
-        .unwrap_or_else(|| String::from_str(&e, "WRAP"))
-}
-
-pub(crate) fn decimals(_e: Env) -> u32 {
-    0
-}

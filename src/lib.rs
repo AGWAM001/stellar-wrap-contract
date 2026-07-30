@@ -28,6 +28,7 @@ mod revoke;
 mod signature;
 mod storage_types;
 mod storage_accounting;
+mod token;
 
 pub use errors::ContractError;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
@@ -268,15 +269,15 @@ impl StellarWrapContract {
     }
 
     pub fn name(e: Env) -> String {
-        queries::name(e)
+        token::name(e)
     }
 
     pub fn symbol(e: Env) -> String {
-        queries::symbol(e)
+        token::symbol(e)
     }
 
     pub fn decimals(e: Env) -> u32 {
-        queries::decimals(e)
+        token::decimals(e)
     }
 
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
