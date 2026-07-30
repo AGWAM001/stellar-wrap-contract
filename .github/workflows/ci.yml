@@ -27,13 +27,9 @@ jobs:
     - name: Check format
       run: cargo fmt --check
     - name: Run clippy
-<<<<<<< HEAD
       run: cargo clippy --all-targets -- -D warnings
-=======
-      run: cargo clippy -- -D warnings
     - name: Check doc compilation
       run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
->>>>>>> ci/add-cargo-doc-check
     - name: Run tests
       run: cargo test
     - name: Clean test snapshots
