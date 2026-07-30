@@ -98,6 +98,15 @@ pub(crate) fn version(e: Env) -> String {
     String::from_str(&e, "0.1.0")
 }
 
+/// Cheap existence check for `(user, period)` without loading a `WrapRecord`.
+///
+/// Prefer `has_wrap` when callers only need a boolean (indexing, gating UI).
+/// Use `get_wrap` when the full record (timestamp, archetype, hash, FSM) is
+/// required.
+pub(crate) fn has_wrap(e: Env, user: Address, period: u64) -> bool {
+    e.storage().persistent().has(&DataKey::Wrap(user, period))
+}
+
 pub(crate) fn total_revoked(e: Env) -> u64 {
     e.storage()
         .instance()

@@ -267,6 +267,13 @@ impl StellarWrapContract {
         queries::version(e)
     }
 
+    /// Return whether a wrap exists for `(user, period)` without fetching the record.
+    ///
+    /// Prefer this over [`Self::get_wrap`] when only a boolean check is needed.
+    pub fn has_wrap(e: Env, user: Address, period: u64) -> bool {
+        queries::has_wrap(e, user, period)
+    }
+
     pub fn health(e: Env) -> ContractHealth {
         queries::health(e)
     }

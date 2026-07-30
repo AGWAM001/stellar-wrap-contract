@@ -86,6 +86,7 @@ Backend signers must include this version byte in all new mint signatures. This 
 - `get_admin(e: Env) -> Option<Address>`
 - `get_admin_pubkey(e: Env) -> Option<BytesN<32>>` — configured Ed25519 verification key (`None` before init). Public key only; use for ops/key-rotation checks without reading raw storage.
 - `version(e: Env) -> String` — semantic version (`0.1.0`). Bump alongside WASM upgrades / `Cargo.toml`.
+- `has_wrap(e: Env, user: Address, period: u64) -> bool` — existence check without loading `WrapRecord`. Prefer over `get_wrap` when only a boolean is needed.
 - `health(e: Env) -> ContractHealth`
 - `name(e: Env) -> String`
 - `symbol(e: Env) -> String`

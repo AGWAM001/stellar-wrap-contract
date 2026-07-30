@@ -153,3 +153,48 @@ fn test_version_returns_semver() {
     assert_eq!(client.version(), String::from_str(&env, "0.1.0"));
 }
 
+#[test]
+fn test_has_wrap_true_and_false() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[3u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let period = 202403u64;
+    let other_period = 202404u64;
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[5u8; 32]);
+
+    assert!(!client.has_wrap(&user, &period));
+    assert!(!client.has_wrap(&user, &other_period));
+
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
+
+    assert!(client.has_wrap(&user, &period));
+    assert!(!client.has_wrap(&user, &other_period));
+    assert!(client.get_wrap(&user, &period).is_some());
+}
+
