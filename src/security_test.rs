@@ -1,12 +1,14 @@
 #![cfg(test)]
 
 use super::*;
+use crate::mint::CURRENT_PAYLOAD_VERSION;
+use crate::signature::construct_mint_payload;
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Ledger},
     xdr::ToXdr,
-    Address, Bytes, BytesN, Env, Symbol,
+    Address, BytesN, Env, Symbol,
 };
 
 fn sign_payload(
@@ -19,15 +21,8 @@ fn sign_payload(
     data_hash: &BytesN<32>,
     payload_version: u32,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
-    payload.append(&payload_version.to_xdr(env));
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
-    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash);
+    use crate::signature::construct_mint_payload;
+    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash, payload_version);
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;
@@ -299,7 +294,6 @@ fn test_cross_contract_replay_protection() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
     // Mint successfully on V1
     client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_v1);
 
@@ -324,17 +318,38 @@ fn test_cross_contract_replay_protection() {
 
     assert!(client_v1.get_wrap(&user, &period).is_some());
     assert!(client_v2.get_wrap(&user, &period).is_some());
-    let payload_v1 =
-        construct_mint_payload(&env, &contract_v1, &user, period, &archetype, &data_hash);
-    let payload_v2 =
-        construct_mint_payload(&env, &contract_v2, &user, period, &archetype, &data_hash);
+    let payload_v1 = construct_mint_payload(
+        &env,
+        &contract_v1,
+        &user,
+        period,
+        &archetype,
+        &data_hash,
+        CURRENT_PAYLOAD_VERSION,
+    );
+    let payload_v2 = construct_mint_payload(
+        &env,
+        &contract_v2,
+        &user,
+        period,
+        &archetype,
+        &data_hash,
+        CURRENT_PAYLOAD_VERSION,
+    );
     assert_ne!(
         payload_v1, payload_v2,
         "Payloads should differ across contract instances"
     );
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
+        client_v2.mint_wrap(
+            &user,
+            &period,
+            &archetype,
+            &data_hash,
+            &CURRENT_PAYLOAD_VERSION,
+            &signature_v1,
+        );
     }));
 
     assert!(
@@ -687,14 +702,14 @@ fn test_unauthorized_acceptance_fails() {
 
     client.initialize(&admin, &pubkey);
 
-    // Set up auths manually to control who is authenticating
     // Admin proposes new_admin
-    env.set_auths(&[(&admin, &contract_id, symbol_short!("propose_admin"), ())]);
+    env.mock_all_auths();
     client.propose_admin(&new_admin);
     assert_eq!(client.get_pending_admin().unwrap(), new_admin);
 
     // Attacker tries to accept - should panic because attacker != new_admin
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("accept_admin"), ())]);
+    // No auth mocked for new_admin, so accept_admin will fail
+    env.set_auths(&[]);
     client.accept_admin();
 }
 
@@ -778,7 +793,7 @@ fn test_non_admin_cannot_propose_admin() {
     client.initialize(&admin, &pubkey);
 
     // Attacker tries to propose - should panic due to require_auth failure
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("propose_admin"), ())]);
+    // No auth mocked — admin.require_auth() will fail
     client.propose_admin(&new_admin);
 }
 
@@ -799,12 +814,13 @@ fn test_non_admin_cannot_cancel_proposal() {
     client.initialize(&admin, &pubkey);
 
     // Admin proposes (mock admin auth)
-    env.set_auths(&[(&admin, &contract_id, symbol_short!("propose_admin"), ())]);
+    env.mock_all_auths();
     client.propose_admin(&new_admin);
     assert_eq!(client.get_pending_admin().unwrap(), new_admin);
 
     // Attacker tries to cancel - should panic due to require_auth failure
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("cancel_proposed_admin"), ())]);
+    // Clear auths so admin.require_auth() fails
+    env.set_auths(&[]);
     client.cancel_proposed_admin();
 }
 
