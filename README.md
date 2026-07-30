@@ -624,6 +624,14 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.94.1 with the
 `wasm32-unknown-unknown` target), so local, Docker, and CI builds match. With
 `rustup` installed, the correct toolchain is selected automatically.
 
+### Front-end dApp
+
+The [`frontend/`](frontend/) directory contains a React dApp for connecting
+Freighter, reading a deployed contract, looking up wallet wraps, and submitting
+signed `mint_wrap` transactions. See [`frontend/README.md`](frontend/README.md)
+for configuration, architecture, security boundaries, and verification
+commands.
+
 Run the test suite with:
 ## Local Development Quickstart
 
