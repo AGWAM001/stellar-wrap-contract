@@ -1,6 +1,6 @@
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
-use soroban_sdk::{contracttype, Address, BytesN, Symbol};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -28,15 +28,15 @@ impl WrapLifecycleFSM {
     }
 
     pub fn can_transition_to(&self, next: &WrapState) -> bool {
-        match (&self.state, next) {
-            (WrapState::Draft, WrapState::Pending) => true,
-            (WrapState::Draft, WrapState::Cancelled) => true,
-            (WrapState::Pending, WrapState::Active) => true,
-            (WrapState::Pending, WrapState::Cancelled) => true,
-            (WrapState::Active, WrapState::Archived) => true,
-            (WrapState::Active, WrapState::Cancelled) => true,
-            _ => false,
-        }
+        matches!(
+            (&self.state, next),
+            (WrapState::Draft, WrapState::Pending)
+                | (WrapState::Draft, WrapState::Cancelled)
+                | (WrapState::Pending, WrapState::Active)
+                | (WrapState::Pending, WrapState::Cancelled)
+                | (WrapState::Active, WrapState::Archived)
+                | (WrapState::Active, WrapState::Cancelled)
+        )
     }
 
     pub fn transition_to(&mut self, next: WrapState, now: u64) -> bool {
@@ -58,6 +58,8 @@ pub struct WrapRecord {
     pub archetype: Symbol,
     pub period: u64, // Standardized to u64 for better indexing/sorting
     pub fsm: WrapLifecycleFSM,
+    pub description: Option<String>,
+    pub image_url: Option<String>,
 }
 
 #[contracttype]
@@ -85,30 +87,15 @@ pub struct FeeParams {
     pub max_fee: i128,
 }
 
-/// Records a user's staking position for wrap priority.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StakeRecord {
-    /// Amount currently staked by the user.
+pub struct TransferFeeConfig {
+    /// Amount of `token` charged to the sender for each successful transfer.
     pub amount: i128,
-    /// Ledger timestamp when the user first staked.
-    pub staked_at: u64,
-    /// Ledger timestamp when unstake was initiated; 0 means not unstaking.
-    pub unstaking_at: u64,
-}
-
-/// Admin-configurable parameters for the staking mechanism.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StakeConfig {
-    /// Minimum amount a user must stake to participate.
-    pub min_stake: i128,
-    /// Cooldown period (in seconds) before a user can withdraw after unstaking.
-    pub cooldown_seconds: u64,
-    /// Fee discount earned per unit of `min_stake` above the minimum, in basis points.
-    pub priority_multiplier_bps: u32,
-    /// Maximum fee discount from staking, in basis points (e.g. 5000 = 50%).
-    pub max_priority_bps: u32,
+    /// Address that receives transfer fees.
+    pub recipient: Address,
+    /// Soroban token contract used to collect fees.
+    pub token: Address,
 }
 
 #[contracttype]
@@ -126,6 +113,13 @@ pub enum DataKey {
     WrapCount(Address),
     /// Stores the latest period minted for a specific user.
     LatestPeriod(Address),
+    /// Stores the periods currently owned by a user so transfers can update
+    /// `LatestPeriod` without scanning contract storage.
+    WrapPeriods(Address),
+    /// Stores the admin-controlled transfer fee configuration.
+    TransferFee,
+    /// Temporary reentrancy guard for transfer calls.
+    TransferGuard,
     /// Stores the highest storage migration version already applied.
     MigrationVersion,
     /// Stores a list of periods a user has minted wraps for.
@@ -150,12 +144,6 @@ pub enum DataKey {
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
-
-    // Staking mechanism keys
-    /// Stores a user's staking record (persistent).
-    Stake(Address),
-    /// Admin-configurable staking parameters (instance-level).
-    StakeConfig,
-    /// Total amount staked across all users (instance-level).
-    TotalStaked,
+    /// Tracks the contract version number, incremented on each `upgrade`.
+    ContractVersion,
 }

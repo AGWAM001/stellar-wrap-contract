@@ -22,6 +22,28 @@ Accounting updates:
 
 ---
 
+### Temporary storage (`e.storage().temporary()`)
+**What lives here**
+
+Non-critical global state that has sensible defaults when absent:
+- `DataKey::TotalRevoked` → `u64` (default: `0`)
+- `DataKey::Paused` → `bool` (default: unpaused)
+- `DataKey::Name` → `String` (default: `"Stellar Wrap Registry"`)
+- `DataKey::Symbol` → `String` (default: `"WRAP"`)
+
+**TTL behavior**
+- Temporary storage entries are extended to **~1 day** (17,280 ledgers) on every write.
+- When entries expire, the contract gracefully falls back to hardcoded defaults.
+- This dramatically reduces state rent fees compared to storing in Instance.
+
+**Why temporary storage?**
+- These entries are non-critical: the contract functions correctly with or without them.
+- Temporary storage has the lowest state rent cost of all three tiers.
+- If an admin customizes `Name`/`Symbol` and the entry expires, it simply reverts to the default.
+- `TotalRevoked` is an informational counter that can be derived from revoke events if lost.
+
+---
+
 ### Persistent storage (`e.storage().persistent()`)
 **What lives here**
 
@@ -56,36 +78,41 @@ let ttl_one_year = 17280 * 365; // ~1 year in ledgers
 
 ---
 
-### Temporary storage (`e.storage().temporary()`)
-**What lives here**
+### MintGuard (temporary storage)
+
 - `DataKey::MintGuard(Address)` → `bool` (stored as `true`)
 
 This is a mint reentrancy / double-call guard.
 
-**TTL behavior / auto-cleanup**
-- Temporary storage entries are **invocation-scoped** and cleared automatically by Soroban.
-- This contract also removes the guard on successful completion:
+The contract also removes the guard on successful completion:
 
 ```rust
 e.storage().temporary().remove(&guard_key);
 ```
 
-**Why temporary storage?**
-- It is cheaper than persistent storage for a guard that only needs to survive during the current call.
-- If execution panics before removal, the guard does not permanently block future mints—temporary storage will expire/clear.
+If execution panics before removal, the guard does not permanently block future mints—temporary storage will expire/clear.
 
 ---
 
 ## 2) DataKey enum → storage key mapping
 
-The contract defines the following storage key enum:
+The contract defines the following storage key enum with their tier assignments:
 
 - `DataKey::Admin` (instance)
 - `DataKey::AdminPubKey` (instance)
+- `DataKey::PendingAdmin` (instance)
+- `DataKey::MigrationVersion` (instance)
 - `DataKey::Wrap(Address, u64)` (persistent)
 - `DataKey::WrapCount(Address)` (persistent)
 - `DataKey::LatestPeriod(Address)` (persistent)
-- `DataKey::MintGuard(Address)` (temporary)
+- `DataKey::UserPeriods(Address)` (persistent)
+- `DataKey::TotalWrapCount` (persistent)
+- `DataKey::AliasHash(Address)` (persistent)
+- `DataKey::TotalRevoked` (temporary)
+- `DataKey::Paused` (temporary)
+- `DataKey::Name` (temporary)
+- `DataKey::Symbol` (temporary)
+- `DataKey::MintGuard(Address)` (temporary — managed separately)
 
 ```rust
 #[contracttype]
@@ -93,12 +120,22 @@ The contract defines the following storage key enum:
 pub enum DataKey {
     Admin,
     AdminPubKey,
+    PendingAdmin,
     Wrap(Address, u64),
     WrapCount(Address),
     LatestPeriod(Address),
-    MintGuard(Address),
+    MigrationVersion,
+    UserPeriods(Address),
+    Paused,
+    TotalWrapCount,
+    TotalRevoked,
+    AliasHash(Address),
+    Name,
+    Symbol,
 }
 ```
+
+> **Note:** The `MintGuard` key is managed separately from the `DataKey` enum using ephemeral temporary storage keys scoped to each mint invocation.
 
 > **Note on key serialization:** `DataKey` is annotated with `#[contracttype]`. Soroban serializes `contracttype` enums into a canonical storage-key representation (using enum discriminants/variants plus the associated values).
 
@@ -210,6 +247,8 @@ Assume a single user address `U` and that the user has `N` distinct wraps (perio
 Instance
 - Admin
 - AdminPubKey
+- PendingAdmin
+- MigrationVersion
 ```
 
 ### Temporary storage (during mint call)
@@ -295,58 +334,25 @@ So:
 
 ---
 
-## 8) Staking mechanism storage
-
-The staking feature (`src/stake.rs`) lets users stake tokens to earn fee
-priority when minting wraps. It uses the following persistent and instance
-storage keys:
-
-### Persistent storage (per user)
-
-- `DataKey::Stake(Address)` → `StakeRecord`
-  - `amount: i128` — currently staked amount
-  - `staked_at: u64` — ledger timestamp when first staked
-  - `unstaking_at: u64` — 0 when active; non-zero when unstake initiated
-
-TTL is extended to ~1 year on every write (`stake`, `unstake`).
-
-### Instance storage (shared)
-
-- `DataKey::StakeConfig` → `StakeConfig`
-  - `min_stake: i128` — minimum stake amount (default: 100)
-  - `cooldown_seconds: u64` — withdrawal delay after unstaking (default: 7 days)
-  - `priority_multiplier_bps: u32` — discount per `min_stake` multiple (default: 1000 = 10%)
-  - `max_priority_bps: u32` — maximum discount cap (default: 5000 = 50%)
-- `DataKey::TotalStaked` → `i128` — aggregate of all users' staked amounts
-
-### Priority calculation
-
-`priority = min( (amount / min_stake) * priority_multiplier_bps, max_priority_bps )`
-
-Users with no stake or an active unstake receive 0 priority (no discount).
-
-### Fee discount
-
-`discounted_fee = raw_fee - (raw_fee * priority_bps / 10_000)`
-
-The `get_discounted_fee` query applies the user's priority to the raw fee
-returned by `compute_current_fee`.
-
----
-
-## 9) Summary table of DataKey variants
+## 8) Summary table of DataKey variants
 
 | DataKey variant | Tier | Value type | TTL setting | Notes |
 |---|---|---|---|---|
 | `Admin` | instance | `Address` | shared instance lifecycle | set once during `initialize()` |
 | `AdminPubKey` | instance | `BytesN<32>` | shared instance lifecycle | set once during `initialize()` |
-| `PendingAdmin` | instance | `Address` | shared instance lifecycle | set during two-step admin transfer |
+| `PendingAdmin` | instance | `Address` | shared instance lifecycle | used for two-step admin transfer |
+| `MigrationVersion` | instance | `u32` | shared instance lifecycle | tracks applied storage migrations |
 | `Wrap(Address, u64)` | persistent | `WrapRecord` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | exists per `(user, period)`; duplicated check uses `has()` |
 | `WrapCount(Address)` | persistent | `u32` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | incremented each `mint_wrap()` |
 | `LatestPeriod(Address)` | persistent | `u64` | `extend_ttl(..., ttl_one_year, ttl_one_year)` only when updated | updated when `period` increases |
-| `Stake(Address)` | persistent | `StakeRecord` | `extend_ttl(..., ttl_one_year, ttl_one_year)` on write | tracks user's staking position |
-| `StakeConfig` | instance | `StakeConfig` | shared instance lifecycle | admin-configurable staking parameters |
-| `TotalStaked` | instance | `i128` | shared instance lifecycle | aggregate of all staked amounts |
+| `UserPeriods(Address)` | persistent | `Vec<u64>` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | tracks all periods for a user |
+| `TotalWrapCount` | persistent | `u32` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | global count across all users |
+| `AliasHash(Address)` | persistent | `BytesN<32>` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | user-controlled alias hash |
+| `TotalRevoked` | temporary | `u64` | `extend_ttl(..., ttl_temp, ttl_temp)` | global revoke counter; defaults to 0 |
+| `Paused` | temporary | `bool` | `extend_ttl(..., ttl_temp, ttl_temp)` | contract pause flag; defaults to unpaused |
+| `Name` | temporary | `String` | `extend_ttl(..., ttl_temp, ttl_temp)` | token name; defaults to "Stellar Wrap Registry" |
+| `Symbol` | temporary | `String` | `extend_ttl(..., ttl_temp, ttl_temp)` | token symbol; defaults to "WRAP" |
+| `MintGuard(Address)` | temporary | `bool` (stored as `true`) | auto-cleaned (temporary TTL) | removed explicitly on success |
 
 ---
 
