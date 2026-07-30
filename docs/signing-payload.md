@@ -4,19 +4,25 @@ This document defines the exact byte layout that the backend must sign and that
 the `mint_wrap` entry-point verifies with `ed25519_verify`.
 
 > **⚠ WARNING — field order is load-bearing.**
-> The contract concatenates each XDR-encoded field in the fixed order shown below
+> The contract concatenates the fields shown below, in the fixed order shown,
 > and passes the resulting byte string directly to `ed25519_verify`.
 > Changing the order, omitting a field, or encoding any field differently will
 > produce a different message digest and the signature check **will always fail**,
 > causing every `mint_wrap` call to be rejected with
 > `Error(Contract, #5)` (`InvalidSignature`).
+>
+> The single source of truth is `construct_mint_payload` in
+> [`src/signature.rs`](../src/signature.rs), reproduced verbatim below. If this
+> document and the code ever disagree, the code wins — please open an issue.
 
 ---
 
 ## Algorithm
 
 ```
-payload = XDR(contract_address)
+payload = MINT_DOMAIN_SEPARATOR            (raw bytes, NOT XDR-encoded)
+        ‖ XDR(payload_version)
+        ‖ XDR(contract_id)
         ‖ XDR(user_address)
         ‖ XDR(period)
         ‖ XDR(archetype)
@@ -26,108 +32,204 @@ signature = Ed25519Sign(admin_private_key, payload)
 ```
 
 `‖` denotes byte-level concatenation. There is no length prefix, separator, or
-framing between fields.
+framing between fields beyond what each field's own XDR encoding already
+carries.
+
+`MINT_DOMAIN_SEPARATOR` is the constant ASCII string `"stellar-wrap-v1"`
+(15 bytes). Unlike every other field, it is appended as raw bytes — it is
+**not** passed through `ToXdr`. Its purpose is to bind every signature to this
+specific contract/scheme so the same admin key can't be replayed against a
+different Soroban contract or a future, incompatible payload format.
+
+`payload_version` is a `u32` that must equal `CURRENT_PAYLOAD_VERSION` in
+[`src/mint.rs`](../src/mint.rs) (currently `1`). `mint_wrap` checks this
+*before* verifying the signature and panics with `Error(Contract, #5)` if it
+doesn't match. If the signing scheme ever changes, the contract will bump
+`CURRENT_PAYLOAD_VERSION` and reject signatures built against the old layout,
+so treat a sudden wave of `InvalidSignature` errors as a cue to check whether
+the version constant moved before assuming key compromise or a client bug.
 
 ---
 
-## Field order and XDR encoding
+## Field order
 
-| # | Field | Rust type | XDR encoding rule |
-|---|-------|-----------|-------------------|
-| 1 | `contract_address` | `Address` (contract) | `soroban_sdk::xdr::ToXdr` on the `Env`-resolved contract address |
-| 2 | `user_address` | `Address` (account) | `soroban_sdk::xdr::ToXdr` on the caller address |
-| 3 | `period` | `u64` | `soroban_sdk::xdr::ToXdr` — big-endian 8-byte unsigned integer wrapped in XDR `Uint64` |
-| 4 | `archetype` | `Symbol` | `soroban_sdk::xdr::ToXdr` — XDR `ScSymbol` (4-byte length prefix followed by UTF-8 bytes, padded to a 4-byte boundary) |
-| 5 | `data_hash` | `BytesN<32>` | `soroban_sdk::xdr::ToXdr` — XDR opaque fixed-length 32 bytes |
+| # | Field | Rust type | Encoding |
+|---|-------|-----------|----------|
+| 1 | `MINT_DOMAIN_SEPARATOR` | `&[u8; 15]` | Raw bytes, literal ASCII `"stellar-wrap-v1"` — **not** XDR-wrapped |
+| 2 | `payload_version` | `u32` | `ToXdr` — same XDR integer treatment as `period` below, just 32 bits wide |
+| 3 | `contract_id` | `Address` (contract) | `ToXdr` on the `Env`-resolved current contract address |
+| 4 | `user_address` | `Address` (account) | `ToXdr` on the caller address |
+| 5 | `period` | `u64` | `ToXdr` — XDR-encoded unsigned 64-bit integer |
+| 6 | `archetype` | `Symbol` | `ToXdr` — XDR-encoded Soroban symbol (short ASCII identifier, up to 32 chars) |
+| 7 | `data_hash` | `BytesN<32>` | `ToXdr` — XDR-encoded 32-byte value |
 
 ### Period encoding
 
 `period` is an integer in `YYYYMM` format (e.g. `202401` for January 2024).
-It is encoded as a plain XDR `Uint64` — the semantic meaning is irrelevant to
-the encoding. Valid range: `202401`–`210012`.
+The semantic meaning is irrelevant to the encoding — it is signed as a plain
+`u64`. Valid range: `202401`–`210012` (enforced by `validate_period` in
+`src/mint.rs`, `Error(Contract, #6)` otherwise).
 
 ### Archetype encoding
 
-`archetype` is a short Soroban `Symbol` (up to 32 characters). It is serialised
-with `ToXdr` which produces an `ScVal` of type `ScValType::Symbol`. The byte
-layout is:
+`archetype` is a short Soroban `Symbol` (up to 32 characters, typically
+constructed with `symbol_short!(...)` for names ≤ 9 chars or `Symbol::new`
+for longer ones).
 
-```
-XDR discriminant (4 bytes, big-endian u32, value 14 for SCV_SYMBOL)
-XDR string length (4 bytes, big-endian u32)
-UTF-8 bytes of the symbol
-padding to next 4-byte boundary (0–3 zero bytes)
-```
+### Data hash
+
+`data_hash` is an opaque 32-byte value — commonly a SHA-256 digest of
+off-chain metadata associated with the wrap. The contract does not interpret
+its contents; it only stores and later returns it via `get_wrap`.
 
 ---
 
 ## Reference implementation
 
-The contract builds the payload in `src/mint.rs`:
+The contract builds and verifies the payload in
+[`src/signature.rs`](../src/signature.rs):
 
 ```rust
-fn build_payload(
+pub const MINT_DOMAIN_SEPARATOR: &[u8; 15] = b"stellar-wrap-v1";
+
+pub fn construct_mint_payload(
     e: &Env,
-    contract: &Address,
+    contract_id: &Address,
     user: &Address,
     period: u64,
     archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
 ) -> Bytes {
     let mut payload = Bytes::new(e);
-    payload.append(&contract.to_xdr(e));         // field 1
-    payload.append(&user.clone().to_xdr(e));     // field 2
-    payload.append(&period.to_xdr(e));           // field 3
-    payload.append(&archetype.clone().to_xdr(e)); // field 4
-    payload.append(&data_hash.clone().to_xdr(e)); // field 5
+    payload.append(&Bytes::from_array(e, MINT_DOMAIN_SEPARATOR));
+    payload.append(&payload_version.to_xdr(e));
+    payload.append(&contract_id.to_xdr(e));
+    payload.append(&user.clone().to_xdr(e));
+    payload.append(&period.to_xdr(e));
+    payload.append(&archetype.clone().to_xdr(e));
+    payload.append(&data_hash.clone().to_xdr(e));
     payload
+}
+
+pub fn verify_mint_signature(
+    e: &Env,
+    admin_pubkey: &BytesN<32>,
+    contract_id: &Address,
+    user: &Address,
+    period: u64,
+    archetype: &Symbol,
+    data_hash: &BytesN<32>,
+    payload_version: u32,
+    signature: &BytesN<64>,
+) -> Result<(), ContractError> {
+    let payload = construct_mint_payload(e, contract_id, user, period, archetype, data_hash, payload_version);
+    e.crypto().ed25519_verify(admin_pubkey, &payload, signature);
+    Ok(())
 }
 ```
 
-The test helper `sign_payload` in `src/test.rs` mirrors this construction
-exactly and can be used as a reference when implementing the signing service.
+`mint_wrap` (in `src/mint.rs`) calls `verify_mint_signature` with
+`e.current_contract_address()` as `contract_id`, after checking
+`payload_version == CURRENT_PAYLOAD_VERSION` and that `period` is in range.
+
+---
+
+## Key management for backend integrators
+
+The admin private key signs every mint claim on this contract, so treat it
+like any other high-value signing key:
+
+- **Never** embed, log, or transmit the admin private key to a frontend,
+  mobile client, or any component outside a trusted backend process. Only the
+  signing service should ever hold it in memory.
+- Store it in a secrets manager, KMS, or HSM rather than in source control,
+  plain environment files, or container images. Prefer signing via a KMS/HSM
+  API (which returns only the signature) over pulling the raw key material
+  into application memory when your infrastructure supports it.
+- **There is currently no on-chain rotation entrypoint for the signing key.**
+  `AdminPubKey` is set exactly once, in `initialize`, and nothing in
+  `src/admin.rs` or `src/lib.rs` updates it afterwards — this is distinct
+  from `update_admin` / `propose_admin` / `accept_admin`, which only rotate
+  the *admin address* used for authorization, not the Ed25519 signing key
+  used for mint claims. If you suspect the signing key is compromised, you
+  need a contract upgrade/migration to introduce rotation; plan your key
+  custody (HSM, strict access control, offline backup of the public key)
+  accordingly.
+- Rate-limit and audit-log every signature your backend issues. Since a
+  signature is a bearer credential for one specific `(user, period,
+  archetype, data_hash)` claim, logging *what* was signed (not the key
+  itself) gives you an audit trail independent of the chain.
+
+---
+
+## Backend signing example (TypeScript)
+
+This mirrors `construct_mint_payload` field-for-field using
+[`@stellar/stellar-sdk`](https://www.npmjs.com/package/@stellar/stellar-sdk),
+which exposes the same XDR/`ScVal` encoding the Soroban host uses on the Rust
+side. Treat this as a reference for the byte layout, not a copy-paste
+production signer — wire the admin secret through your own KMS/HSM integration
+instead of `Keypair.fromSecret`.
+
+```ts
+import { Address, Keypair, nativeToScVal } from "@stellar/stellar-sdk";
+
+// Literal ASCII bytes — must match MINT_DOMAIN_SEPARATOR in src/signature.rs
+// exactly. This is NOT XDR-encoded, unlike every field below it.
+const MINT_DOMAIN_SEPARATOR = Buffer.from("stellar-wrap-v1", "ascii");
+
+// Must equal CURRENT_PAYLOAD_VERSION in src/mint.rs. Bump both together.
+const CURRENT_PAYLOAD_VERSION = 1;
+
+interface MintClaim {
+  contractId: string; // "C..." Soroban contract address
+  user: string; // "G..." Stellar account address
+  period: number; // YYYYMM, e.g. 202508
+  archetype: string; // Soroban Symbol, <= 32 chars
+  dataHash: Buffer; // 32 bytes
+}
+
+/** Builds the exact byte string the contract passes to ed25519_verify. */
+function buildMintPayload(claim: MintClaim): Buffer {
+  return Buffer.concat([
+    MINT_DOMAIN_SEPARATOR,
+    nativeToScVal(CURRENT_PAYLOAD_VERSION, { type: "u32" }).toXDR(),
+    Address.fromString(claim.contractId).toScVal().toXDR(),
+    Address.fromString(claim.user).toScVal().toXDR(),
+    nativeToScVal(BigInt(claim.period), { type: "u64" }).toXDR(),
+    nativeToScVal(claim.archetype, { type: "symbol" }).toXDR(),
+    nativeToScVal(claim.dataHash, { type: "bytes" }).toXDR(),
+  ]);
+}
+
+/**
+ * Signs a mint claim with the admin key. `adminKeypair` should come from your
+ * KMS/HSM/secrets-manager integration, never from a hard-coded secret.
+ */
+function signMintClaim(adminKeypair: Keypair, claim: MintClaim): Buffer {
+  const payload = buildMintPayload(claim);
+  return adminKeypair.sign(payload); // raw 64-byte Ed25519 signature
+}
+```
+
+Call `mint_wrap(user, period, archetype, data_hash, payload_version,
+signature)` on the contract with the same `period`, `archetype`, `data_hash`,
+and `payload_version` used to build the payload above, plus the resulting
+64-byte signature. Any mismatch between what was signed and what is submitted
+produces `Error(Contract, #5)`.
 
 ---
 
 ## Test vectors
 
-The test suite in `src/test.rs` provides several exercisable vectors.
-The table below documents the inputs used by `test_minting_flow` (signing key
-seed `[1u8; 32]`) and `test_mint_emits_event` (signing key seed `[2u8; 32]`),
-which are both deterministic within the Soroban test environment.
-
-### Vector 1 — `test_minting_flow`
-
-| Field | Value |
-|-------|-------|
-| Signing key seed | `[0x01; 32]` (all bytes = 1) |
-| `period` | `202401` |
-| `archetype` | `"arch"` (`symbol_short!("arch")`) |
-| `data_hash` | `[0x2A; 32]` (all bytes = 42) |
-| Expected result | `mint_wrap` succeeds; `get_wrap` returns a record with `data_hash == [0x2A; 32]` |
-
-### Vector 2 — `test_mint_emits_event`
-
-| Field | Value |
-|-------|-------|
-| Signing key seed | `[0x02; 32]` (all bytes = 2) |
-| `period` | `202401` |
-| `archetype` | `"arch"` |
-| `data_hash` | `[0x01; 32]` (all bytes = 1) |
-| Expected result | `mint_wrap` succeeds; emitted event has topics `["mint", user, 202401]` and data `"arch"` |
-
-### Vector 3 — wrong signature is rejected
-
-Any byte modification to the payload (including reordering fields) produces a
-different message. The contract will panic with `Error(Contract, #5)`.
-`test_duplicate_period_fails` and `test_invalid_period_zero_fails` indirectly
-demonstrate this: a stale or malformed signature always causes an early abort.
-
-### Reproducing vectors in Rust
+The test suite in `src/signature.rs` (`#[cfg(test)] mod tests`) provides
+exercisable vectors, e.g. `test_verify_mint_signature_accepts_valid_signature`
+and `test_verify_mint_signature_rejects_wrong_key`. Reproduce them in Rust
+with:
 
 ```rust
 use ed25519_dalek::{Signer, SigningKey};
-use soroban_sdk::{symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env};
 
 fn sign_payload(
     env: &Env,
@@ -135,33 +237,34 @@ fn sign_payload(
     contract: &Address,
     user: &Address,
     period: u64,
-    archetype: &soroban_sdk::Symbol,
+    archetype: &Symbol,
     data_hash: &BytesN<32>,
+    payload_version: u32,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
+    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash, payload_version);
 
-    let mut buf = [0u8; 512];
+    let mut out = [0u8; 512];
     let len = payload.len() as usize;
-    payload.copy_into_slice(&mut buf[..len]);
+    payload.copy_into_slice(&mut out[..len]);
 
-    let sig = signer.sign(&buf[..len]);
-    BytesN::from_array(env, &sig.to_bytes())
+    let signature = signer.sign(&out[..len]);
+    BytesN::from_array(env, &signature.to_bytes())
 }
 ```
 
+Any byte modification to the payload (including reordering fields, or signing
+with the wrong `payload_version`) produces a different message, and
+`ed25519_verify` will panic with `Error(Contract, #5)`.
+
 ---
+
 
 ## Error reference
 
 | Code | Name | Triggered when |
 |------|------|----------------|
 | `#3` | `Unauthorized` | `user.require_auth()` fails |
-| `#5` | `InvalidSignature` | `ed25519_verify` rejects the signature (wrong payload order, wrong key, corrupted bytes) |
+| `#5` | `InvalidSignature` | `payload_version` doesn't match `CURRENT_PAYLOAD_VERSION`, or `ed25519_verify` rejects the signature (wrong payload order/fields, wrong key, corrupted bytes) |
 | `#6` | `InvalidPeriod` | `period` is outside `202401`–`210012` |
 
 See [ERRORS.md](../ERRORS.md) for the full error catalogue.

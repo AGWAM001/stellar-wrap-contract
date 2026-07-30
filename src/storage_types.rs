@@ -1,6 +1,6 @@
 #[cfg(any(test, feature = "testutils"))]
 extern crate std;
-use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, String, Symbol};
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -65,6 +65,18 @@ pub struct WrapRecord {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchWrapItem {
+    pub user: Address,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub payload_version: u32,
+    pub signature: BytesN<64>,
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractHealth {
     /// Whether `initialize()` has been called (admin address is set).
     pub initialized: bool,
@@ -88,6 +100,65 @@ pub struct FeeParams {
     pub max_fee: i128,
 }
 
+/// A privileged action that can only take effect after the timelock delay.
+///
+/// Every variant maps to exactly one state mutation applied by
+/// `timelock::execute`. Keeping the set closed means no scheduled operation can
+/// smuggle in a call the contract does not already expose.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TimelockAction {
+    /// Replace the admin address.
+    SetAdmin(Address),
+    /// Rotate the Ed25519 signing key used to validate mint payloads.
+    SetAdminPubKey(BytesN<32>),
+    /// Upgrade the contract WASM to the given hash.
+    Upgrade(BytesN<32>),
+    /// Publish a new off-chain whitelist merkle root.
+    SetWhitelistRoot(BytesN<32>),
+    /// Change the timelock delay itself (seconds).
+    SetTimelockDelay(u64),
+}
+
+/// A scheduled timelock operation awaiting execution.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimelockOperation {
+    /// The action to apply once `eta` is reached.
+    pub action: TimelockAction,
+    /// Ledger timestamp at which the action becomes executable.
+    pub eta: u64,
+    /// Ledger timestamp at which the action was scheduled.
+    pub scheduled_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutboundBridgeRequest {
+    pub nonce: u64,
+    pub sender: Address,
+    pub destination_chain: u32,
+    pub recipient_address: Bytes,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InboundBridgeRecord {
+    pub source_chain: u32,
+    pub source_nonce: u64,
+    pub recipient: Address,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransferFeeConfig {
@@ -97,6 +168,7 @@ pub struct TransferFeeConfig {
     pub recipient: Address,
     /// Soroban token contract used to collect fees.
     pub token: Address,
+}
 }
 
 #[contracttype]
@@ -141,12 +213,67 @@ pub enum DataKey {
     Paused,
     /// Configurable expiration duration (in seconds) for unverified wraps.
     ExpirationDuration,
+    /// User-controlled opt-out flag. Present means the user has opted out of
+    /// future mints; absent means minting is allowed.
+    OptOut(Address),
 
     // New instance storage keys for accounting / fee system:
     /// Estimated persistent storage bytes used by this contract (instance-level)
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
+    /// Merkle root committing to the off-chain whitelist (instance-level).
+    WhitelistRoot,
+
+    /// Mandatory delay, in seconds, between scheduling and executing a
+    /// privileged action once the timelock is enabled (instance-level).
+    TimelockDelay,
+    /// A scheduled privileged action, keyed by its deterministic operation id.
+    TimelockOp(BytesN<32>),
+    /// Ids of every currently scheduled timelock operation (instance-level).
+    TimelockOps,
+    // Token Bridge storage keys:
+    /// Address authorized as the cross-chain token bridge relayer.
+    BridgeRelayer,
+    /// Status (enabled/disabled) of a supported target/source chain ID.
+    BridgeChainStatus(u32),
+    /// Current outbound bridge request sequence counter.
+    OutboundBridgeNonce,
+    /// Outbound cross-chain wrap request keyed by outbound nonce.
+    OutboundBridgeRequest(u64),
+    /// Inbound cross-chain wrap nonce processing status keyed by (source_chain, source_nonce).
+    InboundBridgeProcessed(u32, u64),
+    /// Inbound cross-chain wrap record keyed by (source_chain, source_nonce).
+    InboundBridgeRecord(u32, u64),
+    // DAO Governance Admin Proposal keys:
+    /// Total number of governance proposals created (u64)
+    AdminProposalCount,
+    /// Individual governance admin proposal record keyed by proposal ID
+    AdminProposal(u64),
+    /// Vote record for a voter on a proposal: (proposal_id, voter)
+    AdminProposalVote(u64, Address),
     /// Tracks the contract version number, incremented on each `upgrade`.
     ContractVersion,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ProposalStatus {
+    Active = 1,
+    Executed = 2,
+    Defeated = 3,
+    Cancelled = 4,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub proposed_admin: Address,
+    pub votes_for: u64,
+    pub votes_against: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub status: ProposalStatus,
 }

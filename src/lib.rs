@@ -23,22 +23,28 @@ use soroban_sdk::{
 
 mod admin;
 mod alias;
+mod bridge;
 mod errors;
 mod events;
+mod governance;
+mod merkle;
 mod mint;
 mod oracle;
 mod queries;
 mod revoke;
 pub mod signature;
-mod storage_accounting;
-mod token;
+mod stake;
 mod storage_accounting;
 mod storage_types;
+mod timelock;
+mod token;
 mod transfer;
 
 pub use mint::CURRENT_PAYLOAD_VERSION;
 pub use oracle::DataHashOracle;
-pub use storage_types::{ContractHealth, DataKey, TransferFeeConfig, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use storage_types::{
+    AdminProposal, ContractHealth, DataKey, InboundBridgeRecord, OutboundBridgeRequest, ProposalStatus, StakeConfig, StakeRecord, TimelockAction, TimelockOperation, TransferFeeConfig, WrapLifecycleFSM, WrapRecord, WrapState,
+};
 pub use token::TokenInterface;
 
 #[contract]
@@ -133,6 +139,14 @@ impl StellarWrapContract {
         );
     }
 
+    pub fn mint_wrap_batch(
+        e: Env,
+        items: soroban_sdk::Vec<storage_types::BatchWrapItem>,
+        aggregated_signature: Option<BytesN<64>>,
+    ) {
+        mint::mint_wrap_batch(e, items, aggregated_signature);
+    }
+
     /// Transfers one wrap record and atomically charges the configured fee.
     ///
     /// The current owner (`from`) must authorize the invocation. The record is
@@ -190,6 +204,15 @@ impl StellarWrapContract {
         limit: u32,
     ) -> soroban_sdk::Vec<WrapRecord> {
         queries::get_wraps(e, user, start, limit)
+    }
+
+    /// Returns every wrap record owned by `user` in a single call.
+    ///
+    /// This is a convenience wrapper around [`get_wraps`] that fetches all
+    /// records without pagination. For users with many wraps, prefer the
+    /// paginated [`get_wraps`] to stay within Soroban resource limits.
+    pub fn get_all_wraps_for_user(e: Env, user: Address) -> soroban_sdk::Vec<WrapRecord> {
+        queries::get_all_wraps_for_user(e, user)
     }
 
     /// Extend the TTL (time-to-live) for all persistent storage entries belonging to a user.
@@ -294,6 +317,31 @@ impl StellarWrapContract {
         queries::get_admin(e)
     }
 
+    /// Return the Ed25519 admin public key, or `None` before initialization.
+    ///
+    /// # Privacy / ops
+    /// Exposes only the public verification key used for mint signatures. Useful
+    /// for operators and clients to confirm key rotation without reading raw
+    /// storage. Does not expose private key material.
+    pub fn get_admin_pubkey(e: Env) -> Option<BytesN<32>> {
+        queries::get_admin_pubkey(e)
+    }
+
+    /// Return the contract semantic version (`MAJOR.MINOR.PATCH`).
+    ///
+    /// Bump this string whenever a WASM upgrade changes the public interface or
+    /// storage semantics so clients can detect the live contract revision.
+    pub fn version(e: Env) -> String {
+        queries::version(e)
+    }
+
+    /// Return whether a wrap exists for `(user, period)` without fetching the record.
+    ///
+    /// Prefer this over [`Self::get_wrap`] when only a boolean check is needed.
+    pub fn has_wrap(e: Env, user: Address, period: u64) -> bool {
+        queries::has_wrap(e, user, period)
+    }
+
     pub fn get_transfer_fee(e: Env) -> Option<TransferFeeConfig> {
         queries::get_transfer_fee(e)
     }
@@ -326,6 +374,31 @@ impl StellarWrapContract {
 
     pub fn decimals(e: Env) -> u32 {
         token::decimals(e)
+    }
+
+    /// Set the caller's opt-out flag, preventing any future wraps from being
+    /// minted for them. Only the user themselves can call this.
+    pub fn opt_out(e: Env, user: Address) {
+        user.require_auth();
+        let key = crate::storage_types::DataKey::OptOut(user);
+        let ttl = 17280 * 365; // ~1 year in ledgers
+        e.storage().persistent().set(&key, &true);
+        e.storage().persistent().extend_ttl(&key, ttl, ttl);
+    }
+
+    /// Clear the caller's opt-out flag, allowing future wraps to be minted for
+    /// them again. Only the user themselves can call this.
+    pub fn opt_in(e: Env, user: Address) {
+        user.require_auth();
+        let key = crate::storage_types::DataKey::OptOut(user);
+        e.storage().persistent().remove(&key);
+    }
+
+    /// Returns `true` if the user has opted out of future mints.
+    pub fn is_opted_out(e: Env, user: Address) -> bool {
+        e.storage()
+            .persistent()
+            .has(&crate::storage_types::DataKey::OptOut(user))
     }
 
     /// Return the current contract version number.
@@ -389,17 +462,308 @@ impl token::TokenInterface for StellarWrapContract {
     pub fn fee_params(e: Env) -> storage_types::FeeParams {
         storage_accounting::get_fee_params(&e)
     }
-}
 
-// #[cfg(test)]
-// mod security_test;
-// #[cfg(test)]
-// mod test;
-// #[cfg(test)]
-// mod test_utils;
+    // ---------------------------------------------------------------------
+    // Off-chain whitelisting (merkle)
+    // ---------------------------------------------------------------------
+
+    /// Admin: publish the merkle root of the off-chain whitelist.
+    ///
+    /// Only the 32-byte root is stored; the member list stays off-chain. See
+    /// `docs/whitelist-merkle.md` for the leaf encoding and tree layout.
+    pub fn set_whitelist_root(e: Env, root: BytesN<32>) {
+        merkle::set_whitelist_root(e, root);
+    }
+
+    /// Admin: remove the whitelist root, disabling whitelist checks.
+    pub fn clear_whitelist_root(e: Env) {
+        merkle::clear_whitelist_root(e);
+    }
+
+    /// Return the published whitelist root, or `None` if none is set.
+    pub fn get_whitelist_root(e: Env) -> Option<BytesN<32>> {
+        merkle::get_whitelist_root(&e)
+    }
+
+    /// Return the whitelist leaf hash for `user`, so off-chain tooling can
+    /// verify it builds identical leaves.
+    pub fn whitelist_leaf(e: Env, user: Address) -> BytesN<32> {
+        merkle::compute_whitelist_leaf(&e, &user)
+    }
+
+    /// Verify that `user` belongs to the published whitelist.
+    ///
+    /// `proof` is the list of sibling hashes ordered from the leaf's sibling up
+    /// to the root. Returns `false` for a non-matching proof.
+    ///
+    /// # Panics
+    /// - [`ContractError::MerkleRootNotSet`] if no root has been published.
+    pub fn verify_whitelist(
+        e: Env,
+        user: Address,
+        proof: soroban_sdk::Vec<BytesN<32>>,
+    ) -> bool {
+        merkle::verify_whitelist(e, user, proof)
+    }
+
+    // ---------------------------------------------------------------------
+    // Timelock controller
+    // ---------------------------------------------------------------------
+
+    /// Admin: enable the timelock with `delay_seconds` (1 hour – 30 days).
+    ///
+    /// One-way switch. Afterwards, admin handover, key rotation, WASM upgrades
+    /// and whitelist-root changes must go through `timelock_schedule` +
+    /// `timelock_execute`. See `docs/timelock.md`.
+    pub fn enable_timelock(e: Env, delay_seconds: u64) {
+        timelock::enable(e, delay_seconds);
+    }
+
+    /// Return the configured timelock delay in seconds, or `None` if disabled.
+    pub fn timelock_delay(e: Env) -> Option<u64> {
+        timelock::delay(&e)
+    }
+
+    /// Admin: queue `action` for execution after the timelock delay.
+    /// Returns the operation id.
+    pub fn timelock_schedule(e: Env, action: TimelockAction) -> BytesN<32> {
+        timelock::schedule(e, action)
+    }
+
+    /// Admin: apply a queued operation whose ETA has been reached.
+    pub fn timelock_execute(e: Env, id: BytesN<32>) {
+        timelock::execute(e, id);
+    }
+
+    /// Admin: discard a queued operation before it executes.
+    pub fn timelock_cancel(e: Env, id: BytesN<32>) {
+        timelock::cancel(e, id);
+    }
+
+    /// Return a queued operation by id, or `None` if it is not queued.
+    pub fn timelock_operation(e: Env, id: BytesN<32>) -> Option<TimelockOperation> {
+        timelock::get_operation(&e, id)
+    }
+
+    /// Return the ids of all queued operations.
+    pub fn timelock_pending(e: Env) -> soroban_sdk::Vec<BytesN<32>> {
+        timelock::pending_operations(&e)
+    }
+
+    /// Compute the deterministic operation id for `action` without scheduling
+    /// it, so callers can pre-compute the id they will need to execute.
+    pub fn timelock_operation_id(e: Env, action: TimelockAction) -> BytesN<32> {
+        timelock::operation_id(&e, &action)
+    }
+    /// Admin: Set the cross-chain token bridge relayer address.
+    pub fn set_bridge_relayer(e: Env, relayer: Address) {
+        bridge::set_bridge_relayer(&e, relayer);
+    }
+
+    /// Returns the configured cross-chain token bridge relayer address.
+    pub fn get_bridge_relayer(e: Env) -> Option<Address> {
+        bridge::get_bridge_relayer(&e)
+    }
+
+    /// Admin: Set enabled status for a destination/source cross-chain network chain ID.
+    pub fn set_chain_status(e: Env, chain_id: u32, enabled: bool) {
+        bridge::set_chain_status(&e, chain_id, enabled);
+    }
+
+    /// View: Check if a cross-chain network chain ID is enabled.
+    pub fn is_chain_supported(e: Env, chain_id: u32) -> bool {
+        bridge::is_chain_supported(&e, chain_id)
+    }
+
+    /// Initiate an outbound cross-chain wrap bridge transfer.
+    pub fn bridge_wrap_out(
+        e: Env,
+        user: Address,
+        destination_chain: u32,
+        recipient_address: Bytes,
+        period: u64,
+    ) -> u64 {
+        bridge::bridge_wrap_out(e, user, destination_chain, recipient_address, period)
+    }
+
+    /// Fulfill an inbound cross-chain wrap bridge transfer from external chain.
+    pub fn bridge_wrap_in(
+        e: Env,
+        source_chain: u32,
+        source_nonce: u64,
+        recipient: Address,
+        period: u64,
+        archetype: Symbol,
+        data_hash: BytesN<32>,
+    ) {
+        bridge::bridge_wrap_in(
+            e,
+            source_chain,
+            source_nonce,
+            recipient,
+            period,
+            archetype,
+            data_hash,
+        );
+    }
+
+    /// View: Fetch an outbound bridge request record by nonce.
+    pub fn get_outbound_bridge_request(e: Env, nonce: u64) -> Option<OutboundBridgeRequest> {
+        bridge::get_outbound_bridge_request(&e, nonce)
+    }
+
+    /// View: Fetch an inbound bridge record by source chain and source nonce.
+    pub fn get_inbound_bridge_record(
+        e: Env,
+        source_chain: u32,
+        source_nonce: u64,
+    ) -> Option<InboundBridgeRecord> {
+        bridge::get_inbound_bridge_record(&e, source_chain, source_nonce)
+    }
+
+    /// View: Check if an inbound cross-chain nonce was already processed.
+    pub fn is_inbound_nonce_processed(e: Env, source_chain: u32, source_nonce: u64) -> bool {
+        bridge::is_inbound_nonce_processed(&e, source_chain, source_nonce)
+    }
+
+    /// View: Get current total outbound bridge nonce count.
+    pub fn get_outbound_nonce(e: Env) -> u64 {
+        bridge::get_outbound_nonce(&e)
+    }
+
+    /// DAO Governance: Create a proposal to update the contract admin.
+    pub fn create_admin_proposal(
+        e: Env,
+        proposer: Address,
+        proposed_admin: Address,
+        duration_seconds: u64,
+    ) -> u64 {
+        governance::create_admin_proposal(e, proposer, proposed_admin, duration_seconds)
+    }
+
+    /// DAO Governance: Cast a vote on an active admin proposal.
+    pub fn vote_admin_proposal(e: Env, voter: Address, proposal_id: u64, support: bool) {
+        governance::vote_admin_proposal(e, voter, proposal_id, support);
+    }
+
+    /// DAO Governance: Execute a proposal after voting period has ended.
+    pub fn execute_admin_proposal(e: Env, proposal_id: u64) {
+        governance::execute_admin_proposal(e, proposal_id);
+    }
+
+    /// DAO Governance: Cancel an active proposal. Proposer or current admin can cancel.
+    pub fn cancel_admin_proposal(e: Env, caller: Address, proposal_id: u64) {
+        governance::cancel_admin_proposal(e, caller, proposal_id);
+    }
+
+    /// DAO Governance: Query proposal details by ID.
+    pub fn get_admin_proposal(e: Env, proposal_id: u64) -> Option<AdminProposal> {
+        governance::get_admin_proposal(&e, proposal_id)
+    }
+
+    /// DAO Governance: Query vote cast by a specific voter on a proposal.
+    pub fn get_admin_proposal_vote(
+        e: Env,
+        proposal_id: u64,
+        voter: Address,
+    ) -> Option<bool> {
+        governance::get_admin_proposal_vote(&e, proposal_id, voter)
+    }
+
+    /// DAO Governance: Query total proposal count.
+    /// DAO Governance: Query total proposal count.
+    pub fn get_admin_proposal_count(e: Env) -> u64 {
+        governance::get_admin_proposal_count(&e)
+    }
+
+    // ── Staking ──────────────────────────────────────────────────────────
+
+    /// Stake tokens to earn wrap fee priority.
+    ///
+    /// The amount must be at least the configured `min_stake`. Staking more
+    /// tokens increases the user's priority, which translates to a fee
+    /// discount (in basis points) when minting wraps.
+    ///
+    /// # Authorization
+    /// `user` must authorize the call.
+    pub fn stake(e: Env, user: Address, amount: i128) {
+        stake::stake(e, user, amount);
+    }
+
+    /// Initiate the unstaking process.
+    ///
+    /// After calling this, the user must wait for the cooldown period
+    /// (configured in `StakeConfig`) before they can withdraw their stake
+    /// via [`withdraw_stake`].
+    ///
+    /// While unstaking is in progress, the user receives no fee priority.
+    ///
+    /// # Authorization
+    /// `user` must authorize the call.
+    pub fn unstake(e: Env, user: Address) {
+        stake::unstake(e, user);
+    }
+
+    /// Complete the unstaking process and withdraw staked funds.
+    ///
+    /// Can only be called after the cooldown period has elapsed since
+    /// [`unstake`] was called.
+    ///
+    /// # Authorization
+    /// `user` must authorize the call.
+    pub fn withdraw_stake(e: Env, user: Address) {
+        stake::withdraw_stake(e, user);
+    }
+
+    /// Return the staking record for `user`, or `None` if they have not staked.
+    pub fn get_stake(e: Env, user: Address) -> Option<StakeRecord> {
+        stake::get_stake(&e, user)
+    }
+
+    /// Return the fee-discount priority (in basis points) for `user`.
+    ///
+    /// Returns 0 if the user has no active stake.
+    pub fn get_stake_priority(e: Env, user: Address) -> u32 {
+        stake::get_stake_priority(&e, user)
+    }
+
+    /// Return the total amount staked across all users.
+    pub fn total_staked(e: Env) -> i128 {
+        stake::get_total_staked(&e)
+    }
+
+    /// Admin: set the staking configuration.
+    ///
+    /// # Panics
+    /// - If `min_stake == 0` or `cooldown_seconds == 0`
+    /// - If `max_priority_bps > 10_000`
+    pub fn set_stake_config(e: Env, config: StakeConfig) {
+        stake::set_stake_config(&e, config);
+    }
+
+    /// Return the current staking configuration.
+    pub fn get_stake_config(e: Env) -> StakeConfig {
+        stake::get_stake_config(&e)
+    }
+
+    /// Return the discounted fee for `user`, taking their stake priority
+    /// into account.
+    ///
+    /// Users with active stakes receive a percentage discount based on
+    /// their priority score. Users without stakes see the raw fee.
+    pub fn get_discounted_fee(e: Env, user: Address) -> i128 {
+        stake::get_discounted_fee(&e, user)
+    }
+}
 
 #[cfg(test)]
 mod balance_of_test;
+#[cfg(test)]
+mod bridge_test;
+#[cfg(test)]
+mod governance_test;
+#[cfg(test)]
+mod merkle_test;
 #[cfg(test)]
 mod oracle_test;
 #[cfg(test)]
@@ -407,8 +771,14 @@ mod expiration_test;
 #[cfg(test)]
 mod security_test;
 #[cfg(test)]
+mod stake_test;
+#[cfg(test)]
 mod test;
 #[cfg(test)]
 mod test_utils;
+#[cfg(test)]
+mod test_vectors;
+#[cfg(test)]
+mod timelock_test;
 #[cfg(test)]
 mod transfer_test;

@@ -4,6 +4,10 @@
 
 Soroban contract for storing non-transferable Stellar Wrap records by wallet and reporting successful wrap mints through events.
 
+## Changelog and client migration notes
+
+The current contract interface for version 0.1.0 is documented in [CHANGELOG.md](CHANGELOG.md). Backend and frontend consumers should review the migration notes there before updating integrations, especially around the versioned mint-signature payload and the expanded query surface.
+
 ## Contract layout
 
 The contract is split into focused modules:
@@ -11,10 +15,13 @@ The contract is split into focused modules:
 - `src/lib.rs`: contract type and module wiring
 - `src/admin.rs`: initialization and admin updates
 - `src/mint.rs`: period validation, signature verification, wrap minting, event emission
+- `src/bridge.rs`: generic token bridge interface for cross-chain wrap interactions
 - `src/queries.rs`: read-only queries and metadata
 - `src/errors.rs`: contract error codes
 - `src/storage_types.rs`: storage keys and persisted record types
 - `src/test_utils.rs`: shared test-only helpers (e.g. payload signing)
+
+For detailed bridge architecture and cross-chain workflow, see [docs/bridge-architecture.md](docs/bridge-architecture.md).
 
 ## Data model
 
@@ -750,3 +757,15 @@ SOROBAN_GAS_REPORT=1 cargo test -- --nocapture
 > **Note:** The Soroban test framework automatically creates snapshot files under
 > `test_snapshots/` during test execution. These are already in `.gitignore` and
 > can be cleaned up with `make clean-snapshots`.
+
+## DAO Governance Module
+
+The contract includes a DAO governance module for updating the contract's admin address via community/on-chain proposals.
+
+### Workflow
+
+1. **Create Proposal:** Call `create_admin_proposal(proposer, proposed_admin, duration_seconds)`. Generates a proposal in `Active` status.
+2. **Cast Votes:** Accounts vote via `vote_admin_proposal(voter, proposal_id, support)`. Double voting is prevented.
+3. **Execute Proposal:** After `duration_seconds` elapses, call `execute_admin_proposal(proposal_id)`. If `votes_for > votes_against`, the contract admin updates to `proposed_admin`.
+4. **Cancel Proposal:** Proposer or current admin can cancel active proposals via `cancel_admin_proposal(caller, proposal_id)`.
+

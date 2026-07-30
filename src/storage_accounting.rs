@@ -36,7 +36,7 @@ pub(crate) fn add_storage_bytes(e: &Env, delta: u64) {
 
 pub(crate) fn sub_storage_bytes(e: &Env, delta: u64) {
     let cur = get_storage_bytes(e);
-    let nxt = if cur >= delta { cur - delta } else { 0u64 };
+    let nxt = cur.saturating_sub(delta);
     set_storage_bytes(e, nxt);
 }
 
@@ -70,7 +70,7 @@ pub(crate) fn compute_current_fee(e: &Env) -> i128 {
     let params = get_fee_params(e);
     let bytes = get_storage_bytes(e);
     // KiB rounding (ceil)
-    let kib = (bytes + 1023) / 1024;
+    let kib = bytes.div_ceil(1024);
     // steps = kib / scale_step_kib, rounding up
     let steps = (kib + params.scale_step_kib.saturating_sub(1)) / params.scale_step_kib;
     let increment = params.per_kib_fee.saturating_mul(steps as i128);

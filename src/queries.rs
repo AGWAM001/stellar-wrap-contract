@@ -27,20 +27,51 @@ pub(crate) fn total_wrap_count(e: Env) -> u32 {
 
 pub(crate) fn verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool {
     let wrap: Option<WrapRecord> = e.storage().persistent().get(&DataKey::Wrap(user, period));
-    match wrap {
-        Some(record) => {
-            let computed_hash = e.crypto().sha256(&data);
-            let computed_hash = BytesN::from_array(&e, &computed_hash.to_array());
-            record.data_hash == computed_hash
-        }
-        None => false,
-    }
+    wrap.map_or(false, |record| {
+        let computed_hash = e.crypto().sha256(&data);
+        let computed_hash = BytesN::from_array(&e, &computed_hash.to_array());
+        record.data_hash == computed_hash
+    })
 }
 
 pub(crate) fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
     let latest_key = DataKey::LatestPeriod(user.clone());
-    let period: u64 = e.storage().persistent().get(&latest_key)?;
-    e.storage().persistent().get(&DataKey::Wrap(user, period))
+    if let Some(period) = e.storage().persistent().get::<_, u64>(&latest_key) {
+        if let Some(wrap) = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Wrap(user.clone(), period))
+        {
+            return Some(wrap);
+        }
+    }
+
+    // A revoked latest record clears the marker but leaves older periods intact.
+    let periods: soroban_sdk::Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&DataKey::UserPeriods(user.clone()))?;
+    let mut latest: Option<WrapRecord> = None;
+
+    for index in 0..periods.len() {
+        if let Some(period) = periods.get(index) {
+            if let Some(wrap) = e
+                .storage()
+                .persistent()
+                .get::<_, WrapRecord>(&DataKey::Wrap(user.clone(), period))
+            {
+                let is_newer = match latest.as_ref() {
+                    None => true,
+                    Some(current) => wrap.period > current.period,
+                };
+                if is_newer {
+                    latest = Some(wrap);
+                }
+            }
+        }
+    }
+
+    latest
 }
 
 pub(crate) fn get_wraps(
@@ -77,6 +108,11 @@ pub(crate) fn get_wraps(
     results
 }
 
+pub(crate) fn get_all_wraps_for_user(e: Env, user: Address) -> soroban_sdk::Vec<WrapRecord> {
+    // Fetch all wraps by using the maximum possible range.
+    get_wraps(e, user, 0, u32::MAX)
+}
+
 pub(crate) fn health(e: Env) -> ContractHealth {
     let has_admin = e.storage().instance().has(&DataKey::Admin);
     let has_signing_key = e.storage().instance().has(&DataKey::AdminPubKey);
@@ -90,6 +126,34 @@ pub(crate) fn health(e: Env) -> ContractHealth {
 
 pub(crate) fn get_admin(e: Env) -> Option<Address> {
     e.storage().instance().get(&DataKey::Admin)
+}
+
+/// Return the configured Ed25519 admin public key, or `None` before `initialize`.
+///
+/// Operators use this to confirm which off-chain signing key is live without
+/// inspecting raw instance storage. The value is a public verification key only;
+/// it does not reveal private key material. Prefer this over reading storage
+/// directly when building ops/monitoring tooling.
+pub(crate) fn get_admin_pubkey(e: Env) -> Option<BytesN<32>> {
+    e.storage().instance().get(&DataKey::AdminPubKey)
+}
+
+/// Return the contract semantic version string (`MAJOR.MINOR.PATCH`).
+///
+/// Keep this in sync with `Cargo.toml` package version. Bump it in the same
+/// release that ships a WASM upgrade so clients can detect which interface they
+/// are talking to after `upgrade()`.
+pub(crate) fn version(e: Env) -> String {
+    String::from_str(&e, "0.1.0")
+}
+
+/// Cheap existence check for `(user, period)` without loading a `WrapRecord`.
+///
+/// Prefer `has_wrap` when callers only need a boolean (indexing, gating UI).
+/// Use `get_wrap` when the full record (timestamp, archetype, hash, FSM) is
+/// required.
+pub(crate) fn has_wrap(e: Env, user: Address, period: u64) -> bool {
+    e.storage().persistent().has(&DataKey::Wrap(user, period))
 }
 
 pub(crate) fn total_revoked(e: Env) -> u64 {
