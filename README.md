@@ -153,6 +153,28 @@ soroban contract invoke \
 
 Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
 
+## Security model
+
+Mint signatures are verified over a canonical payload that binds the request to:
+
+- a domain separator (`stellar-wrap-v1`)
+- the deploying contract instance address
+- the target user address
+- the period (`YYYYMM`)
+- the archetype symbol
+- the data hash
+
+The payload is constructed by concatenating the XDR-encoded fields in the order above. Off-chain signers should use the same byte layout when creating signatures:
+
+1. encode the domain separator as raw bytes
+2. append the XDR encoding of the contract address
+3. append the XDR encoding of the user address
+4. append the XDR encoding of the period as `u64`
+5. append the XDR encoding of the archetype symbol
+6. append the XDR encoding of the 32-byte data hash
+
+This ensures that a signature for one contract instance cannot be replayed against another deployment with the same admin key.
+
 ## Event schema
 
 Successful wrap mints emit one event:
@@ -175,9 +197,20 @@ Successful wrap mints emit one event:
 
 ### Admin update event
 
-The `update_admin` function does **not** emit an event. To track admin changes, indexers should:
-- Query the `get_admin(e)` function periodically
-- Store the current admin address and detect changes across queries
+Successful admin rotations emit one event:
+
+- **Topic 0**: `admin` (`Symbol`)
+- **Topic 1**: `updated` (`Symbol`)
+- **Data**: `(old_admin, new_admin)` (`Address`, `Address`) — previous admin and newly assigned admin
+
+**Example values:**
+- Topic 0: `admin`
+- Topic 1: `updated`
+- Data: `(GOLDADMIN..., GNEWADMIN...)`
+
+**Properties relevant to indexers:**
+- The event is emitted only after the current admin authorizes the call and storage is updated
+- Indexers can track admin rotations without polling `get_admin(e)`, but should still verify the live admin via that query when enforcing privileged flows
 
 ### Revoke event
 

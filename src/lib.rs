@@ -20,12 +20,14 @@ extern crate std;
 use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
-mod burn;
+mod alias;
 mod errors;
 mod mint;
 mod queries;
 mod revoke;
+mod signature;
 mod storage_types;
+mod storage_accounting;
 
 pub use errors::ContractError;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
@@ -43,9 +45,16 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+    pub fn pause(e: Env) {
+        admin::set_pause(e, true);
+    }
 
     pub fn unpause(e: Env) {
-        admin::unpause(e);
+        admin::set_pause(e, false);
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        admin::is_paused(&e)
     }
 
     /// Records that the storage migration `version` has been applied.
@@ -62,15 +71,40 @@ impl StellarWrapContract {
         admin::upgrade(e, new_wasm_hash);
     }
 
+    pub fn propose_admin(e: Env, new_admin: Address) {
+        admin::propose_admin(e, new_admin);
+    }
+
+    pub fn accept_admin(e: Env) {
+        admin::accept_admin(e);
+    }
+
+    pub fn cancel_proposed_admin(e: Env) {
+        admin::cancel_proposed_admin(e);
+    }
+
+    pub fn get_pending_admin(e: Env) -> Option<Address> {
+        admin::get_pending_admin(e)
+    }
+
+    pub fn set_name(e: Env, name: String) {
+        admin::set_name(e, name);
+    }
+
+    pub fn set_symbol(e: Env, symbol: String) {
+        admin::set_symbol(e, symbol);
+    }
+
     pub fn mint_wrap(
         e: Env,
         user: Address,
         period: u64,
         archetype: Symbol,
         data_hash: BytesN<32>,
+        payload_version: u32,
         signature: BytesN<64>,
     ) {
-        mint::mint_wrap(e, user, period, archetype, data_hash, signature);
+        mint::mint_wrap(e, user, period, archetype, data_hash, payload_version, signature);
     }
 
     pub fn transition_wrap_state(
@@ -219,6 +253,20 @@ impl StellarWrapContract {
         queries::health(e)
     }
 
+    /// Set or update the caller's alias hash.
+    ///
+    /// Only the `user` themselves can call this — `require_auth` is enforced
+    /// inside the alias module. The hash is stored as opaque 32-byte data so
+    /// no raw personal information ever touches the chain.
+    pub fn set_alias_hash(e: Env, user: Address, alias_hash: BytesN<32>) {
+        alias::set_alias_hash(e, user, alias_hash);
+    }
+
+    /// Return the alias hash for `user`, or `None` if one has not been set.
+    pub fn get_alias_hash(e: Env, user: Address) -> Option<BytesN<32>> {
+        alias::get_alias_hash(e, user)
+    }
+
     pub fn name(e: Env) -> String {
         queries::name(e)
     }
@@ -241,6 +289,26 @@ impl StellarWrapContract {
 
     pub fn total_revoked(e: Env) -> u64 {
         queries::total_revoked(e)
+    }
+
+    /// Returns estimated current persistent storage bytes used by the contract.
+    pub fn storage_bytes(e: Env) -> u64 {
+        storage_accounting::get_storage_bytes(&e)
+    }
+
+    /// Returns the computed current fee according to the on-chain params.
+    pub fn current_fee(e: Env) -> i128 {
+        storage_accounting::compute_current_fee(&e)
+    }
+
+    /// Admin: set fee params.
+    pub fn set_fee_params(e: Env, params: storage_types::FeeParams) {
+        storage_accounting::set_fee_params(&e, params);
+    }
+
+    /// View: fee params
+    pub fn fee_params(e: Env) -> storage_types::FeeParams {
+        storage_accounting::get_fee_params(&e)
     }
 }
 
