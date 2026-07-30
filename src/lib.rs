@@ -22,6 +22,7 @@ use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, Byte
 mod admin;
 mod alias;
 mod errors;
+mod events;
 mod mint;
 mod queries;
 mod revoke;

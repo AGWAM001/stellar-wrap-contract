@@ -1,5 +1,6 @@
-use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env, Symbol};
+use soroban_sdk::{panic_with_error, Address, BytesN, Env, Symbol};
 
+use crate::events::{MintEventData, MintEventType};
 use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
 
@@ -30,6 +31,7 @@ fn get_admin_pubkey(e: &Env) -> BytesN<32> {
 
 
 
+#[allow(deprecated)]
 pub(crate) fn mint_wrap(
     e: Env,
     user: Address,
@@ -116,10 +118,13 @@ pub(crate) fn mint_wrap(
             .extend_ttl(&user_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
     }
 
-    e.events()
-        .publish((symbol_short!("mint"), user, period), archetype);
+    e.events().publish(
+        (MintEventType::Mint.to_symbol(&e), user.clone(), period),
+        MintEventData::Mint(user, period, archetype),
+    );
 }
 
+#[allow(deprecated)]
 pub(crate) fn transition_wrap_state(
     e: Env,
     user: Address,
@@ -147,7 +152,7 @@ pub(crate) fn transition_wrap_state(
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     e.events().publish(
-        (symbol_short!("trans"), user, period),
-        next_state,
+        (MintEventType::Transition.to_symbol(&e), user.clone(), period),
+        MintEventData::Transition(user, period, next_state),
     );
 }
