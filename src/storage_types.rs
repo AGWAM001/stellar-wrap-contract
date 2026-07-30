@@ -1,4 +1,4 @@
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
 use soroban_sdk::{contracttype, Address, BytesN, Symbol};
 
@@ -28,15 +28,15 @@ impl WrapLifecycleFSM {
     }
 
     pub fn can_transition_to(&self, next: &WrapState) -> bool {
-        match (&self.state, next) {
-            (WrapState::Draft, WrapState::Pending) => true,
-            (WrapState::Draft, WrapState::Cancelled) => true,
-            (WrapState::Pending, WrapState::Active) => true,
-            (WrapState::Pending, WrapState::Cancelled) => true,
-            (WrapState::Active, WrapState::Archived) => true,
-            (WrapState::Active, WrapState::Cancelled) => true,
-            _ => false,
-        }
+        matches!(
+            (&self.state, next),
+            (WrapState::Draft, WrapState::Pending)
+                | (WrapState::Draft, WrapState::Cancelled)
+                | (WrapState::Pending, WrapState::Active)
+                | (WrapState::Pending, WrapState::Cancelled)
+                | (WrapState::Active, WrapState::Archived)
+                | (WrapState::Active, WrapState::Cancelled)
+        )
     }
 
     pub fn transition_to(&mut self, next: WrapState, now: u64) -> bool {

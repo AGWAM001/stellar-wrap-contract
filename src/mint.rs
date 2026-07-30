@@ -1,11 +1,14 @@
 use soroban_sdk::{panic_with_error, Address, BytesN, Env, Symbol};
 
 use crate::events::{MintEventData, MintEventType};
+use crate::storage_accounting;
 use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
-use crate::storage_accounting;
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
+/// TTL for temporary storage entries (~1 day in ledgers at 5s/ledger).
+/// Used for non-critical data migrated from Instance to Temporary storage.
+pub(crate) const TTL_TEMP: u32 = 17_280;
 pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 
 fn validate_period(e: &Env, period: u64) {
@@ -30,9 +33,6 @@ fn get_admin_pubkey(e: &Env) -> BytesN<32> {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
 
-
-
-#[allow(deprecated)]
 pub(crate) fn mint_wrap(
     e: Env,
     user: Address,
@@ -80,10 +80,7 @@ pub(crate) fn mint_wrap(
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     // Account for estimated storage bytes for new wrap record
-    storage_accounting::add_storage_bytes(
-        &e,
-        storage_accounting::estimate_wrap_bytes_new(),
-    );
+    storage_accounting::add_storage_bytes(&e, storage_accounting::estimate_wrap_bytes_new());
 
     // Update wrap count and account for count entry if first insert
     let count_key = DataKey::WrapCount(user.clone());
@@ -134,7 +131,7 @@ pub(crate) fn mint_wrap(
         .persistent()
         .get(&user_periods_key)
         .unwrap_or(soroban_sdk::Vec::new(&e));
-    
+
     if !periods.contains(period) {
         periods.push_back(period);
         e.storage().persistent().set(&user_periods_key, &periods);
@@ -155,13 +152,7 @@ pub(crate) fn mint_wrap(
     );
 }
 
-#[allow(deprecated)]
-pub(crate) fn transition_wrap_state(
-    e: Env,
-    user: Address,
-    period: u64,
-    next_state: WrapState,
-) {
+pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
     crate::admin::require_not_paused(&e);
     user.require_auth();
 
@@ -173,7 +164,7 @@ pub(crate) fn transition_wrap_state(
         .unwrap_or_else(|| panic_with_error!(e, ContractError::WrapNotFound));
 
     let now = e.ledger().timestamp();
-    if !record.fsm.transition_to(next_state.clone(), now) {
+    if !record.fsm.transition_to(next_state, now) {
         panic_with_error!(e, ContractError::InvalidStateTransition);
     }
 
