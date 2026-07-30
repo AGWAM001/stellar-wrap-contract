@@ -153,6 +153,8 @@ soroban contract invoke \
 
 Returns `true` if `sha256(data)` matches the stored `data_hash`, otherwise `false`.
 
+See [docs/verify-data.md](docs/verify-data.md) for a full guide on hashing JSON payloads, canonicalisation requirements, and matching/non-matching examples.
+
 ## Security model
 
 Mint signatures are verified over a canonical payload that binds the request to:
@@ -408,6 +410,7 @@ storage layout must ship as a numbered migration:
 ## Documentation
 
 - [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, and test vectors required by backend signing services (issue #213)
+- [verify_data guide](docs/verify-data.md) — how to hash JSON payloads, canonicalisation requirements, and matching/non-matching examples
 
 ## Development
 
