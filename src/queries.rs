@@ -43,24 +43,37 @@ pub(crate) fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
     e.storage().persistent().get(&DataKey::Wrap(user, period))
 }
 
-pub(crate) fn get_wraps(e: Env, user: Address, start: u32, limit: u32) -> soroban_sdk::Vec<WrapRecord> {
+pub(crate) fn get_wraps(
+    e: Env,
+    user: Address,
+    start: u32,
+    limit: u32,
+) -> soroban_sdk::Vec<WrapRecord> {
     let mut results = soroban_sdk::Vec::new(&e);
     let user_periods_key = DataKey::UserPeriods(user.clone());
-    
-    if let Some(periods) = e.storage().persistent().get::<_, soroban_sdk::Vec<u64>>(&user_periods_key) {
+
+    if let Some(periods) = e
+        .storage()
+        .persistent()
+        .get::<_, soroban_sdk::Vec<u64>>(&user_periods_key)
+    {
         let len = periods.len();
         if start < len {
             let end = core::cmp::min(start.saturating_add(limit), len);
             for i in start..end {
                 if let Some(period) = periods.get(i) {
-                    if let Some(wrap) = e.storage().persistent().get(&DataKey::Wrap(user.clone(), period)) {
+                    if let Some(wrap) = e
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::Wrap(user.clone(), period))
+                    {
                         results.push_back(wrap);
                     }
                 }
             }
         }
     }
-    
+
     results
 }
 
