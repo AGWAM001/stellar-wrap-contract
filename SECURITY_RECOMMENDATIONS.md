@@ -12,9 +12,9 @@ For developer-facing error handling (e.g. `Error(Contract, #4)`), see the
 ## ✅ Signature Verification — Implemented (Ed25519)
 
 ### Current State
-`mint_wrap()` and `update_wrap()` perform real Ed25519 cryptographic signature
-verification using Soroban's built-in `e.crypto().ed25519_verify()`. The old
-unconditional stub (`fn verify_signature() -> bool { true }`) no longer exists.
+All mint operations perform real Ed25519 cryptographic signature verification
+using Soroban's built-in `e.crypto().ed25519_verify()`. Verification is
+implemented in `src/signature.rs` via the `verify_mint_signature()` function.
 
 ### How It Works
 
@@ -25,31 +25,66 @@ against the stored admin public key before minting.
 #### Payload construction (`mint_wrap`)
 
 ```
-payload = 0x01
-        ‖ XDR(contract_address)
-        ‖ XDR(user)
-        ‖ XDR(period)        // u64 — prevents period replay
+payload = b"stellar-wrap-v1"                   // domain separator (15 bytes)
+        ‖ XDR(payload_version: u32)             // currently 1
+        ‖ XDR(contract_address)                 // cross-contract replay protection
+        ‖ XDR(user)                             // identity binding
+        ‖ XDR(period)                           // u64 — prevents period replay
         ‖ XDR(archetype)
-        ‖ XDR(data_hash)     // SHA-256 of off-chain JSON
+        ‖ XDR(data_hash)                        // SHA-256 of off-chain JSON
 ```
 
-The first byte is a payload version field. The contract currently accepts version `1` only, and backend signers must use this version for all new signatures.
+The domain separator (`b"stellar-wrap-v1"`) makes the payload self-describing and
+prevents ambiguity if the same Ed25519 key is reused across contracts or signing
+schemes. A `payload_version` field follows the domain separator; the contract
+currently accepts version `1` only, and backend signers must use this version for
+all new signatures.
 
 Each field is XDR-encoded before concatenation, which provides unambiguous
 length-delimited framing and prevents field-boundary collisions.
 
 #### On-chain verification (Rust)
 
-```rust
-let mut payload = Bytes::new(&e);
-payload.append(&e.current_contract_address().to_xdr(&e));   // cross-contract replay protection
-payload.append(&user.clone().to_xdr(&e));                   // identity binding
-payload.append(&period.to_xdr(&e));                         // period binding
-payload.append(&archetype.clone().to_xdr(&e));
-payload.append(&data_hash.clone().to_xdr(&e));
+The actual verification lives in `src/signature.rs`:
 
-// Panics with ContractError::InvalidSignature (code 6) on failure
-e.crypto().ed25519_verify(&admin_pubkey, &payload, &signature);
+```rust
+pub fn verify_mint_signature(
+    e: &Env,
+    admin_pubkey: &BytesN<32>,
+    contract_id: &Address,
+    user: &Address,
+    period: u64,
+    archetype: &Symbol,
+    data_hash: &BytesN<32>,
+    payload_version: u32,
+    signature: &BytesN<64>,
+) -> Result<(), ContractError> {
+    let payload = construct_mint_payload(
+        e, contract_id, user, period, archetype, data_hash, payload_version,
+    );
+    e.crypto().ed25519_verify(admin_pubkey, &payload, signature);
+    Ok(())
+}
+
+fn construct_mint_payload(
+    e: &Env,
+    contract_id: &Address,
+    user: &Address,
+    period: u64,
+    archetype: &Symbol,
+    data_hash: &BytesN<32>,
+    payload_version: u32,
+) -> Bytes {
+    let mut payload = Bytes::new(e);
+    payload.append(&Bytes::from_array(e, MINT_DOMAIN_SEPARATOR));
+    payload.append(&payload_version.to_xdr(e));
+    payload.append(&contract_id.to_xdr(e));
+    payload.append(&user.clone().to_xdr(e));
+    payload.append(&period.to_xdr(e));
+    payload.append(&archetype.clone().to_xdr(e));
+    payload.append(&data_hash.clone().to_xdr(e));
+    payload
+}
 ```
 
 `ed25519_verify` panics (traps) when verification fails — the transaction is
@@ -61,14 +96,19 @@ rolled back and no state is written.
 import { xdr, Address } from "@stellar/stellar-sdk";
 import * as nacl from "tweetnacl";
 
+const MINT_DOMAIN_SEPARATOR = Buffer.from("stellar-wrap-v1", "utf-8");
+
 function buildMintPayload(
   contractId: string,
   userAddress: string,
   period: bigint,
   archetype: string,
-  dataHash: Uint8Array
+  dataHash: Uint8Array,
+  payloadVersion: number = 1,
 ): Uint8Array {
   const parts: Uint8Array[] = [
+    MINT_DOMAIN_SEPARATOR,
+    xdr.Uint64.fromBigInt(BigInt(payloadVersion)).toXDR(),
     xdr.ScAddress.scAddressTypeContract(Buffer.from(contractId, "hex")).toXDR(),
     Address.fromString(userAddress).toXDR(),
     xdr.Uint64.fromBigInt(period).toXDR(),
@@ -78,9 +118,9 @@ function buildMintPayload(
   return Buffer.concat(parts);
 }
 
-const payload  = buildMintPayload(contractId, user, period, archetype, dataHash);
+const payload  = buildMintPayload(contractId, user, period, archetype, dataHash, 1);
 const signature = nacl.sign.detached(payload, adminSecretKey);
-// Pass signature (64 bytes) as the `signature` argument to mint_wrap()
+// Pass signature (64 bytes) alongside payload_version=1 to mint_wrap()
 ```
 
 ### Security Properties Provided
@@ -88,7 +128,7 @@ const signature = nacl.sign.detached(payload, adminSecretKey);
 | Property | How it is enforced |
 |---|---|
 | **Identity binding** | `user` is in the payload; a signature for Alice cannot be used by Bob |
-| **Cross-contract replay** | `contract_address` is the first payload field |
+| **Cross-contract replay** | `contract_address` is included in the payload; a signature for contract V1 cannot be replayed against V2 |
 | **Period replay** | `period` is in the payload; same user cannot reuse a signature for a different period |
 | **Data integrity** | `data_hash` (SHA-256 of JSON) is in the payload and also stored on-chain |
 | **Duplicate prevention** | `WrapAlreadyExists` check after signature verification |
@@ -257,15 +297,16 @@ cross-version replay attack.
 
 This contract defends against this by:
 
-1. Prepending `payload_version: u32` as the **first** element of every signed
-   payload.
+1. Prepending a **domain separator** (`b"stellar-wrap-v1"`) followed by
+   `payload_version: u32` as the first two elements of every signed payload.
 2. Rejecting any `mint_wrap` call where the provided `payload_version` does not
    equal `CURRENT_PAYLOAD_VERSION` (currently `1`) — it panics with
-   `Error(Contract, #5)` / ContractError::InvalidSignature`).
+   `Error(Contract, #5)` / `ContractError::InvalidSignature`.
 
 **On-chain payload (v1):
 ```
-payload = XDR(payload_version: u32)
+payload = b"stellar-wrap-v1"                   // domain separator (15 bytes)
+        ‖ XDR(payload_version: u32)             // currently 1
         ‖ XDR(contract_address)
         ‖ XDR(user)
         ‖ XDR(period)
@@ -276,22 +317,23 @@ payload = XDR(payload_version: u32)
 ### On-chain Version Evolution Rules
 - **Rust location:** `src/mint.rs:8` (`CURRENT_PAYLOAD_VERSION = 1`)
 - **Validation:** `src/mint.rs:19-23` (`validate_payload_version`)
-- **Prepend order:** `src/mint.rs:42` (version is the first field in the payload)
+- **Payload construction:** `src/signature.rs` (`construct_mint_payload`) — domain separator + version are the first bytes
 
 ### Backend Migration Checklist
 
 #### Step 1 — Contract upgrade (Soroban CLI)
 
 Bump the version number in `src/mint.rs:8` (`CURRENT_PAYLOAD_VERSION = 1 -> 2`),
-then redeploy the WASM via `soroban contract upgrade`, and finally update the payload schema
-(see `Makefile` targets. Deploy via `soroban contract upgrade`).
+then redeploy the WASM via `soroban contract upgrade`, and update the payload schema
+(see `Makefile` targets).
 
-#### Step 2 — Backend signing code (pdate
-When the new contract lands on-chain, update the backend signer to prepend the new
+#### Step 2 — Backend signing code update
+
+When the new contract lands on-chain, update the backend signer to include the new
 version:
 
 ```python
-# BEFORE (no version prefix)
+# BEFORE (no version prefix — old format)
 payload = (
     contract.to_xdr()
     + user.to_xdr()
@@ -301,10 +343,12 @@ payload = (
 )
 signature = admin_ed25519_sign(payload)
 
-# AFTER — prepend payload_version as a LE u32 XDR-encoded
+# AFTER — prepend domain separator and payload_version
+DOMAIN_SEPARATOR = b"stellar-wrap-v1"
 payload_version = 2  # MUST match CURRENT_PAYLOAD_VERSION in src/mint.rs
 payload = (
-    xdr_u32(payload_version)
+    DOMAIN_SEPARATOR
+    + xdr_u32(payload_version)
     + contract.to_xdr()
     + user.to_xdr()
     + period.to_xdr()
@@ -314,30 +358,36 @@ payload = (
 signature = admin_ed25519_sign(payload)
 ```
 
-```
-* Order matters: payload_version MUST be the first bytes in the serialized buffer,
-because the contract appends it in `src/mint.rs:42`.
+> **Order matters:** The domain separator MUST be first, followed immediately by `payload_version`,
+> because the contract constructs the payload in that exact order in `src/signature.rs`.
 
-#### Step 3 — Cutover & dual-signing)
+#### Step 3 — Cutover & dual-signing
 
-To avoid a race windows during the WASM upgrade:
-1. Roll out backend code accepts old-style signatures to accept both versions while the network still only
-   old contract:
-     - *Option A — Deploy in two phases:
-     first deploy a "accepts both v1 and v2 signatures (by temporarily
-        wideningvalidate_payload_version to accept an allow list), then
-        swap back once backend clients.
-     - *Option B (simpler, recommended — Perform the contract upgrade in a
-        single ledger window; do not send mints during the swap.  Ledger
-        sequenced to
-#### Step 4 ) Verify against replay safety
+To avoid a race window during the WASM upgrade:
+1. First deploy backend code that temporarily accepts both old and new payload versions,
+   keeping the existing contract unchanged.
+2. Upgrade the contract to only accept the new version.
+3. Once all backend clients have migrated, remove backward compatibility from the backend.
+
+*Option A — Two-phase deploy:*
+First deploy a contract version that accepts both v1 and v2 signatures (by
+widening `validate_payload_version` to accept an allow list), then swap back
+once all backend clients have migrated.
+
+*Option B (simpler, recommended):*
+Perform the contract upgrade in a single ledger window; do not send mints
+during the swap. Sequence the upgrade so that backend switches to signing
+v2 first, then the contract is upgraded.
+
+#### Step 4 — Verify against replay safety
+
 After upgrade:
 ```bash
-cargo test test_cross_version_replay  # run the version-gating tests added
+cargo test test_cross_version_replay  # run the version-gating tests
 cargo test test::test_same_version_sig_succeeds
 ```
 
-Tests added covering the attack vectors:
+Tests covering the attack vectors:
 
 | Test | Attack | Result |
 |------|--------|--------|
