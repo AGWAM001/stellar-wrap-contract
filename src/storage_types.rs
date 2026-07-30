@@ -1,6 +1,6 @@
 #[cfg(any(test, feature = "testutils"))]
 extern crate std;
-use soroban_sdk::{contracttype, Address, BytesN, Symbol};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -58,6 +58,8 @@ pub struct WrapRecord {
     pub archetype: Symbol,
     pub period: u64, // Standardized to u64 for better indexing/sorting
     pub fsm: WrapLifecycleFSM,
+    pub description: Option<String>,
+    pub image_url: Option<String>,
 }
 
 #[contracttype]

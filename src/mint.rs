@@ -72,6 +72,8 @@ pub(crate) fn mint_wrap(
         archetype: archetype.clone(),
         period,
         fsm: WrapLifecycleFSM::new(WrapState::Active, now),
+        description: None,
+        image_url: None,
     };
 
     e.storage().persistent().set(&wrap_key, &record);
