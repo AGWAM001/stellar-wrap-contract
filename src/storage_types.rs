@@ -1,6 +1,6 @@
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Symbol};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, String, Symbol};
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -28,15 +28,15 @@ impl WrapLifecycleFSM {
     }
 
     pub fn can_transition_to(&self, next: &WrapState) -> bool {
-        match (&self.state, next) {
-            (WrapState::Draft, WrapState::Pending) => true,
-            (WrapState::Draft, WrapState::Cancelled) => true,
-            (WrapState::Pending, WrapState::Active) => true,
-            (WrapState::Pending, WrapState::Cancelled) => true,
-            (WrapState::Active, WrapState::Archived) => true,
-            (WrapState::Active, WrapState::Cancelled) => true,
-            _ => false,
-        }
+        matches!(
+            (&self.state, next),
+            (WrapState::Draft, WrapState::Pending)
+                | (WrapState::Draft, WrapState::Cancelled)
+                | (WrapState::Pending, WrapState::Active)
+                | (WrapState::Pending, WrapState::Cancelled)
+                | (WrapState::Active, WrapState::Archived)
+                | (WrapState::Active, WrapState::Cancelled)
+        )
     }
 
     pub fn transition_to(&mut self, next: WrapState, now: u64) -> bool {
@@ -58,7 +58,21 @@ pub struct WrapRecord {
     pub archetype: Symbol,
     pub period: u64, // Standardized to u64 for better indexing/sorting
     pub fsm: WrapLifecycleFSM,
+    pub description: Option<String>,
+    pub image_url: Option<String>,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchWrapItem {
+    pub user: Address,
+    pub period: u64,
+    pub archetype: Symbol,
+    pub data_hash: BytesN<32>,
+    pub payload_version: u32,
+    pub signature: BytesN<64>,
+}
+
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,6 +101,8 @@ pub struct FeeParams {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutboundBridgeRequest {
     pub nonce: u64,
     pub sender: Address,
@@ -111,6 +127,18 @@ pub struct InboundBridgeRecord {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferFeeConfig {
+    /// Amount of `token` charged to the sender for each successful transfer.
+    pub amount: i128,
+    /// Address that receives transfer fees.
+    pub recipient: Address,
+    /// Soroban token contract used to collect fees.
+    pub token: Address,
+}
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     /// Stores the address of the admin.
@@ -125,6 +153,13 @@ pub enum DataKey {
     WrapCount(Address),
     /// Stores the latest period minted for a specific user.
     LatestPeriod(Address),
+    /// Stores the periods currently owned by a user so transfers can update
+    /// `LatestPeriod` without scanning contract storage.
+    WrapPeriods(Address),
+    /// Stores the admin-controlled transfer fee configuration.
+    TransferFee,
+    /// Temporary reentrancy guard for transfer calls.
+    TransferGuard,
     /// Stores the highest storage migration version already applied.
     MigrationVersion,
     /// Stores a list of periods a user has minted wraps for.
@@ -143,13 +178,15 @@ pub enum DataKey {
     Symbol,
     /// Emergency pause state flag.
     Paused,
+    /// User-controlled opt-out flag. Present means the user has opted out of
+    /// future mints; absent means minting is allowed.
+    OptOut(Address),
 
     // New instance storage keys for accounting / fee system:
     /// Estimated persistent storage bytes used by this contract (instance-level)
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
-
     // Token Bridge storage keys:
     /// Address authorized as the cross-chain token bridge relayer.
     BridgeRelayer,
@@ -163,5 +200,35 @@ pub enum DataKey {
     InboundBridgeProcessed(u32, u64),
     /// Inbound cross-chain wrap record keyed by (source_chain, source_nonce).
     InboundBridgeRecord(u32, u64),
+    // DAO Governance Admin Proposal keys:
+    /// Total number of governance proposals created (u64)
+    AdminProposalCount,
+    /// Individual governance admin proposal record keyed by proposal ID
+    AdminProposal(u64),
+    /// Vote record for a voter on a proposal: (proposal_id, voter)
+    AdminProposalVote(u64, Address),
+    /// Tracks the contract version number, incremented on each `upgrade`.
+    ContractVersion,
 }
 
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ProposalStatus {
+    Active = 1,
+    Executed = 2,
+    Defeated = 3,
+    Cancelled = 4,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub proposed_admin: Address,
+    pub votes_for: u64,
+    pub votes_against: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub status: ProposalStatus,
+}
