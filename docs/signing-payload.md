@@ -156,6 +156,7 @@ fn sign_payload(
 
 ---
 
+
 ## Error reference
 
 | Code | Name | Triggered when |
