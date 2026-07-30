@@ -24,15 +24,15 @@ fn sign_payload(
     data_hash: &BytesN<32>,
     payload_version: u32,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
-    payload.append(&payload_version.to_xdr(env));
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
-    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash);
+    let payload = crate::signature::construct_mint_payload(
+        env,
+        contract,
+        user,
+        period,
+        archetype,
+        data_hash,
+        payload_version,
+    );
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;
@@ -73,7 +73,14 @@ fn test_replay_attack_same_period_fails() {
     );
 
     // First mint - should succeed
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
 
     // Verify the wrap was created
     let wrap = client.get_wrap(&user, &period);
@@ -81,7 +88,14 @@ fn test_replay_attack_same_period_fails() {
 
     // Replay attack: Try to mint again with the exact same parameters
     // This should PANIC with WrapAlreadyExists error (#4)
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
 }
 
 /// Test 2: Replay Attack with Different Hash (but same period)
@@ -118,7 +132,14 @@ fn test_replay_attack_different_hash_same_period_fails() {
     );
 
     // First mint - should succeed
-    client.mint_wrap(&user, &period, &archetype, &data_hash_1, &CURRENT_PAYLOAD_VERSION, &signature_1);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash_1,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_1,
+    );
 
     let signature_2 = sign_payload(
         &env,
@@ -133,7 +154,14 @@ fn test_replay_attack_different_hash_same_period_fails() {
 
     // Try to mint again for the same period with a different hash
     // This should still fail - period is already used
-    client.mint_wrap(&user, &period, &archetype, &data_hash_2, &CURRENT_PAYLOAD_VERSION, &signature_2);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash_2,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_2,
+    );
 }
 
 /// Test 3: Multiple Valid Periods Work Correctly
@@ -193,9 +221,30 @@ fn test_multiple_periods_for_same_user_success() {
     );
 
     // All three should succeed
-    client.mint_wrap(&user, &period_1, &archetype, &data_hash_1, &CURRENT_PAYLOAD_VERSION, &signature_1);
-    client.mint_wrap(&user, &period_2, &archetype, &data_hash_2, &CURRENT_PAYLOAD_VERSION, &signature_2);
-    client.mint_wrap(&user, &period_3, &archetype, &data_hash_3, &CURRENT_PAYLOAD_VERSION, &signature_3);
+    client.mint_wrap(
+        &user,
+        &period_1,
+        &archetype,
+        &data_hash_1,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_1,
+    );
+    client.mint_wrap(
+        &user,
+        &period_2,
+        &archetype,
+        &data_hash_2,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_2,
+    );
+    client.mint_wrap(
+        &user,
+        &period_3,
+        &archetype,
+        &data_hash_3,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_3,
+    );
 
     // Verify all three wraps exist
     assert!(client.get_wrap(&user, &period_1).is_some());
@@ -241,7 +290,14 @@ fn test_signature_cannot_be_stolen_by_another_user() {
     );
 
     // User A mints successfully
-    client.mint_wrap(&user_a, &period, &archetype, &data_hash_for_a, &CURRENT_PAYLOAD_VERSION, &signature_a);
+    client.mint_wrap(
+        &user_a,
+        &period,
+        &archetype,
+        &data_hash_for_a,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_a,
+    );
 
     // Verify User A has the wrap
     let wrap_a = client.get_wrap(&user_a, &period);
@@ -327,7 +383,14 @@ fn test_cross_contract_replay_protection() {
 
     client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
     // Mint successfully on V1
-    client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_v1);
+    client_v1.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_v1,
+    );
 
     // Verify the wrap exists on V1
     let wrap_v1 = client_v1.get_wrap(&user, &period);
@@ -346,7 +409,14 @@ fn test_cross_contract_replay_protection() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_v2);
+    client_v2.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_v2,
+    );
 
     // Verify both contracts have independent storage
     let wrap_v2 = client_v2.get_wrap(&user, &period);
@@ -355,7 +425,7 @@ fn test_cross_contract_replay_protection() {
     // Both wraps should exist independently
     assert!(client_v1.get_wrap(&user, &period).is_some());
     assert!(client_v2.get_wrap(&user, &period).is_some());
-  
+
     // NOTE: For full cross-contract replay protection, the signature
     // verification should include the contract address in the signed payload.
     // This test demonstrates that the contracts currently have independent storage,
@@ -417,7 +487,14 @@ fn test_gas_analysis_mint_operation() {
     env.budget().reset_default();
 
     // Perform the mint operation
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
 
     // Get budget consumption
     env.budget().print();
@@ -490,7 +567,14 @@ fn test_gas_analysis_multiple_mints() {
             CURRENT_PAYLOAD_VERSION,
         );
 
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+        client.mint_wrap(
+            &user,
+            &period,
+            &archetype,
+            &data_hash,
+            &CURRENT_PAYLOAD_VERSION,
+            &signature,
+        );
     }
 
     let cpu_insns = env.budget().cpu_instruction_cost();
@@ -538,7 +622,14 @@ fn test_timestamp_is_from_ledger_not_user() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
 
     let wrap = client.get_wrap(&user, &period).unwrap();
 
@@ -562,7 +653,14 @@ fn test_timestamp_is_from_ledger_not_user() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period_2, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature_2);
+    client.mint_wrap(
+        &user,
+        &period_2,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature_2,
+    );
 
     let wrap_2 = client.get_wrap(&user, &period_2).unwrap();
     assert_eq!(
@@ -604,7 +702,14 @@ fn test_edge_case_long_symbols() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
 
     let wrap = client.get_wrap(&user, &period);
     assert!(wrap.is_some(), "Should handle reasonably long symbols");
@@ -644,7 +749,14 @@ fn test_non_admin_cannot_mint() {
     );
 
     // This should panic because attacker is not authorized
-    client.mint_wrap(&user, &period, &archetype, &data_hash, &CURRENT_PAYLOAD_VERSION, &signature);
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash,
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
 }
 
 /// Test 11: Revocation - Non-admin cannot revoke wraps
@@ -751,12 +863,17 @@ fn test_unauthorized_acceptance_fails() {
 
     // Set up auths manually to control who is authenticating
     // Admin proposes new_admin
-    env.set_auths(&[(&admin, &contract_id, symbol_short!("propose_admin"), ())]);
+    env.set_auths(&[(&admin, &contract_id, Symbol::new(&env, "propose_admin"), ())]);
     client.propose_admin(&new_admin);
     assert_eq!(client.get_pending_admin().unwrap(), new_admin);
 
     // Attacker tries to accept - should panic because attacker != new_admin
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("accept_admin"), ())]);
+    env.set_auths(&[(
+        &attacker,
+        &contract_id,
+        Symbol::new(&env, "accept_admin"),
+        (),
+    )]);
     client.accept_admin();
 }
 
@@ -840,7 +957,12 @@ fn test_non_admin_cannot_propose_admin() {
     client.initialize(&admin, &pubkey);
 
     // Attacker tries to propose - should panic due to require_auth failure
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("propose_admin"), ())]);
+    env.set_auths(&[(
+        &attacker,
+        &contract_id,
+        Symbol::new(&env, "propose_admin"),
+        (),
+    )]);
     client.propose_admin(&new_admin);
 }
 
@@ -861,12 +983,17 @@ fn test_non_admin_cannot_cancel_proposal() {
     client.initialize(&admin, &pubkey);
 
     // Admin proposes (mock admin auth)
-    env.set_auths(&[(&admin, &contract_id, symbol_short!("propose_admin"), ())]);
+    env.set_auths(&[(&admin, &contract_id, Symbol::new(&env, "propose_admin"), ())]);
     client.propose_admin(&new_admin);
     assert_eq!(client.get_pending_admin().unwrap(), new_admin);
 
     // Attacker tries to cancel - should panic due to require_auth failure
-    env.set_auths(&[(&attacker, &contract_id, symbol_short!("cancel_proposed_admin"), ())]);
+    env.set_auths(&[(
+        &attacker,
+        &contract_id,
+        Symbol::new(&env, "cancel_proposed_admin"),
+        (),
+    )]);
     client.cancel_proposed_admin();
 }
 

@@ -42,12 +42,9 @@ fn sign_payload(
     archetype: &Symbol,
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
+    let payload = stellar_wrap_contract::signature::construct_mint_payload(
+        env, contract, user, period, archetype, data_hash, 1,
+    );
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;
@@ -93,7 +90,14 @@ fuzz_target!(|input: MintWrapInput| {
     };
 
     let before = client.balance_of(&user);
-    let result = client.try_mint_wrap(&user, &input.period, &archetype, &data_hash, &signature);
+    let result = client.try_mint_wrap(
+        &user,
+        &input.period,
+        &archetype,
+        &data_hash,
+        &1u32,
+        &signature,
+    );
     let minted_ok = matches!(result, Ok(Ok(())));
 
     if minted_ok {
@@ -117,8 +121,14 @@ fuzz_target!(|input: MintWrapInput| {
         );
 
         if input.remint {
-            let remint =
-                client.try_mint_wrap(&user, &input.period, &archetype, &data_hash, &signature);
+            let remint = client.try_mint_wrap(
+                &user,
+                &input.period,
+                &archetype,
+                &data_hash,
+                &1u32,
+                &signature,
+            );
             assert!(
                 !matches!(remint, Ok(Ok(()))),
                 "remint of the same (user, period) must fail"
