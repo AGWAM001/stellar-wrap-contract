@@ -1,0 +1,26 @@
+{
+  "name": "stellar-wrap-indexer-pipeline",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Soroban-RPC indexer pipeline for Stellar Wrap contract historical storage data",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "backfill": "ts-node src/index.ts --backfill",
+    "reconcile": "ts-node src/index.ts --reconcile-only",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^13.0.0",
+    "dotenv": "^16.4.0",
+    "sql.js": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0",
+    "vitest": "^1.3.0"
+  }
+}
