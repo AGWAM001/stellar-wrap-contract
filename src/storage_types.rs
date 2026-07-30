@@ -71,6 +71,20 @@ pub struct ContractHealth {
     pub has_signing_key: bool,
 }
 
+/// New struct: FeeParams for algorithmic fee model
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeParams {
+    /// base fee in token units
+    pub base_fee: i128,
+    /// fee increment per scaling step (applied per `scale_step_kib`)
+    pub per_kib_fee: i128,
+    /// scaling step in KiB (e.g., 1024 means per KiB)
+    pub scale_step_kib: u64,
+    /// maximum fee cap
+    pub max_fee: i128,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -104,4 +118,10 @@ pub enum DataKey {
     Symbol,
     /// Emergency pause state flag.
     Paused,
+
+    // New instance storage keys for accounting / fee system:
+    /// Estimated persistent storage bytes used by this contract (instance-level)
+    StorageBytes,
+    /// Params for the algorithmic fee function (instance-level)
+    FeeParams,
 }
