@@ -1500,6 +1500,7 @@ fn test_fsm_invalid_state_transition_fails() {
 #[test]
 fn test_mint_guard_on_failure_leaves_no_residual_state() {}
 
+#[test]
 fn test_upgrade_emits_event() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
