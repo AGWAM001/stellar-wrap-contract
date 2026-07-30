@@ -20,6 +20,7 @@ extern crate std;
 use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
 
 mod admin;
+mod burn;
 mod errors;
 mod mint;
 mod queries;
@@ -232,6 +233,10 @@ impl StellarWrapContract {
 
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
         revoke::revoke_wrap(e, user, period, reason_hash);
+    }
+
+    pub fn burn_wrap(e: Env, user: Address, period: u64) {
+        burn::burn_wrap(e, user, period);
     }
 
     pub fn total_revoked(e: Env) -> u64 {
