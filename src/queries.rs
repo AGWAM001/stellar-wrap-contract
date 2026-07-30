@@ -128,6 +128,34 @@ pub(crate) fn get_admin(e: Env) -> Option<Address> {
     e.storage().instance().get(&DataKey::Admin)
 }
 
+/// Return the configured Ed25519 admin public key, or `None` before `initialize`.
+///
+/// Operators use this to confirm which off-chain signing key is live without
+/// inspecting raw instance storage. The value is a public verification key only;
+/// it does not reveal private key material. Prefer this over reading storage
+/// directly when building ops/monitoring tooling.
+pub(crate) fn get_admin_pubkey(e: Env) -> Option<BytesN<32>> {
+    e.storage().instance().get(&DataKey::AdminPubKey)
+}
+
+/// Return the contract semantic version string (`MAJOR.MINOR.PATCH`).
+///
+/// Keep this in sync with `Cargo.toml` package version. Bump it in the same
+/// release that ships a WASM upgrade so clients can detect which interface they
+/// are talking to after `upgrade()`.
+pub(crate) fn version(e: Env) -> String {
+    String::from_str(&e, "0.1.0")
+}
+
+/// Cheap existence check for `(user, period)` without loading a `WrapRecord`.
+///
+/// Prefer `has_wrap` when callers only need a boolean (indexing, gating UI).
+/// Use `get_wrap` when the full record (timestamp, archetype, hash, FSM) is
+/// required.
+pub(crate) fn has_wrap(e: Env, user: Address, period: u64) -> bool {
+    e.storage().persistent().has(&DataKey::Wrap(user, period))
+}
+
 pub(crate) fn total_revoked(e: Env) -> u64 {
     e.storage()
         .temporary()

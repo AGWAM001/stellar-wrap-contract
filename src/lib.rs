@@ -317,6 +317,31 @@ impl StellarWrapContract {
         queries::get_admin(e)
     }
 
+    /// Return the Ed25519 admin public key, or `None` before initialization.
+    ///
+    /// # Privacy / ops
+    /// Exposes only the public verification key used for mint signatures. Useful
+    /// for operators and clients to confirm key rotation without reading raw
+    /// storage. Does not expose private key material.
+    pub fn get_admin_pubkey(e: Env) -> Option<BytesN<32>> {
+        queries::get_admin_pubkey(e)
+    }
+
+    /// Return the contract semantic version (`MAJOR.MINOR.PATCH`).
+    ///
+    /// Bump this string whenever a WASM upgrade changes the public interface or
+    /// storage semantics so clients can detect the live contract revision.
+    pub fn version(e: Env) -> String {
+        queries::version(e)
+    }
+
+    /// Return whether a wrap exists for `(user, period)` without fetching the record.
+    ///
+    /// Prefer this over [`Self::get_wrap`] when only a boolean check is needed.
+    pub fn has_wrap(e: Env, user: Address, period: u64) -> bool {
+        queries::has_wrap(e, user, period)
+    }
+
     pub fn get_transfer_fee(e: Env) -> Option<TransferFeeConfig> {
         queries::get_transfer_fee(e)
     }
@@ -749,6 +774,8 @@ mod stake_test;
 mod test;
 #[cfg(test)]
 mod test_utils;
+#[cfg(test)]
+mod test_vectors;
 #[cfg(test)]
 mod timelock_test;
 #[cfg(test)]
