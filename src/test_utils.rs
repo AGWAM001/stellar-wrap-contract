@@ -13,12 +13,15 @@ pub(crate) fn sign_payload(
     archetype: &Symbol,
     data_hash: &BytesN<32>,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
+    let payload = crate::signature::construct_mint_payload(
+        env,
+        contract,
+        user,
+        period,
+        archetype,
+        data_hash,
+        1, // Defaulting payload_version to 1 for this test utility
+    );
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;

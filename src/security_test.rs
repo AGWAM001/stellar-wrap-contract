@@ -19,15 +19,15 @@ fn sign_payload(
     data_hash: &BytesN<32>,
     payload_version: u32,
 ) -> BytesN<64> {
-    let mut payload = Bytes::new(env);
-    payload.append(&Bytes::from_array(env, &[MINT_SIGNATURE_PAYLOAD_VERSION]));
-    payload.append(&payload_version.to_xdr(env));
-    payload.append(&contract.to_xdr(env));
-    payload.append(&user.clone().to_xdr(env));
-    payload.append(&period.to_xdr(env));
-    payload.append(&archetype.clone().to_xdr(env));
-    payload.append(&data_hash.clone().to_xdr(env));
-    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash);
+    let payload = crate::signature::construct_mint_payload(
+        env,
+        contract,
+        user,
+        period,
+        archetype,
+        data_hash,
+        payload_version,
+    );
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;
