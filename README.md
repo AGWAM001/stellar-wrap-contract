@@ -90,6 +90,14 @@ Backend signers must include this version byte in all new mint signatures. This 
 - `decimals(e: Env) -> u32`
 - `migration_version(e: Env) -> u32`
 
+### Deterministic mint signature fixtures
+
+See `src/test_vectors.rs` for fixed seed, period, archetype, and data-hash inputs used to cross-check backend/frontend/contract payload encoding. Regenerate printed hex with:
+
+```bash
+cargo test --lib gen_print_mint_fixtures -- --ignored --nocapture
+```
+
 ## Event schemas
 
 ### Mint event

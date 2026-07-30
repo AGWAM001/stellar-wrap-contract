@@ -314,3 +314,5 @@ mod security_test;
 mod test;
 #[cfg(test)]
 mod test_utils;
+#[cfg(test)]
+mod test_vectors;
