@@ -84,6 +84,7 @@ Backend signers must include this version byte in all new mint signatures. This 
 - `verify_data(e: Env, user: Address, period: u64, data: Bytes) -> bool`
 - `get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord>`
 - `get_admin(e: Env) -> Option<Address>`
+- `get_admin_pubkey(e: Env) -> Option<BytesN<32>>` — configured Ed25519 verification key (`None` before init). Public key only; use for ops/key-rotation checks without reading raw storage.
 - `health(e: Env) -> ContractHealth`
 - `name(e: Env) -> String`
 - `symbol(e: Env) -> String`

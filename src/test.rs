@@ -128,3 +128,19 @@ fn test_name_symbol_decimals_defaults() {
     assert_eq!(client.symbol(), String::from_str(&env, "WRAP"));
     assert_eq!(client.decimals(), 0);
 }
+
+#[test]
+fn test_get_admin_pubkey_before_and_after_init() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    assert!(client.get_admin_pubkey().is_none());
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[9u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    assert_eq!(client.get_admin_pubkey().unwrap(), pubkey);
+}
+

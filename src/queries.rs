@@ -79,6 +79,16 @@ pub(crate) fn get_admin(e: Env) -> Option<Address> {
     e.storage().instance().get(&DataKey::Admin)
 }
 
+/// Return the configured Ed25519 admin public key, or `None` before `initialize`.
+///
+/// Operators use this to confirm which off-chain signing key is live without
+/// inspecting raw instance storage. The value is a public verification key only;
+/// it does not reveal private key material. Prefer this over reading storage
+/// directly when building ops/monitoring tooling.
+pub(crate) fn get_admin_pubkey(e: Env) -> Option<BytesN<32>> {
+    e.storage().instance().get(&DataKey::AdminPubKey)
+}
+
 pub(crate) fn total_revoked(e: Env) -> u64 {
     e.storage()
         .instance()

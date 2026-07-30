@@ -249,6 +249,16 @@ impl StellarWrapContract {
         queries::get_admin(e)
     }
 
+    /// Return the Ed25519 admin public key, or `None` before initialization.
+    ///
+    /// # Privacy / ops
+    /// Exposes only the public verification key used for mint signatures. Useful
+    /// for operators and clients to confirm key rotation without reading raw
+    /// storage. Does not expose private key material.
+    pub fn get_admin_pubkey(e: Env) -> Option<BytesN<32>> {
+        queries::get_admin_pubkey(e)
+    }
+
     pub fn health(e: Env) -> ContractHealth {
         queries::health(e)
     }
