@@ -2529,3 +2529,281 @@ fn test_set_alias_hash_requires_auth() {
     let dummy_wasm_hash = BytesN::from_array(&env, &[0xBBu8; 32]);
     client.upgrade(&dummy_wasm_hash);
 }
+
+// ─── Feature #287: User opt-out flag ────────────────────────────────────────
+
+#[cfg(test)]
+mod opt_out_tests {
+    extern crate std;
+
+    use ed25519_dalek::{Signer, SigningKey};
+    use soroban_sdk::{
+        symbol_short,
+        testutils::{Address as _, MockAuth, MockAuthInvoke},
+        Address, BytesN, Env,
+    };
+
+    use crate::{
+        mint::CURRENT_PAYLOAD_VERSION,
+        signature::construct_mint_payload,
+        StellarWrapContract, StellarWrapContractClient,
+    };
+
+    /// Build a valid admin Ed25519 signature for a mint call.
+    fn make_sig(
+        env: &Env,
+        signer: &SigningKey,
+        contract_id: &Address,
+        user: &Address,
+        period: u64,
+        archetype: &soroban_sdk::Symbol,
+        data_hash: &BytesN<32>,
+    ) -> BytesN<64> {
+        let payload = construct_mint_payload(
+            env,
+            contract_id,
+            user,
+            period,
+            archetype,
+            data_hash,
+            CURRENT_PAYLOAD_VERSION,
+        );
+        let mut buf = [0u8; 512];
+        let len = payload.len() as usize;
+        payload.copy_into_slice(&mut buf[..len]);
+        let sig = signer.sign(&buf[..len]);
+        BytesN::from_array(env, &sig.to_bytes())
+    }
+
+    // ── is_opted_out defaults to false ──────────────────────────────────────
+
+    #[test]
+    fn test_is_opted_out_default_false() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+
+        let user = Address::generate(&env);
+        assert!(!client.is_opted_out(&user));
+    }
+
+    // ── opt_out sets the flag ────────────────────────────────────────────────
+
+    #[test]
+    fn test_opt_out_sets_flag() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        env.mock_all_auths();
+
+        let user = Address::generate(&env);
+        client.opt_out(&user);
+        assert!(client.is_opted_out(&user));
+    }
+
+    // ── opt_in clears the flag ───────────────────────────────────────────────
+
+    #[test]
+    fn test_opt_in_clears_flag() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        env.mock_all_auths();
+
+        let user = Address::generate(&env);
+        client.opt_out(&user);
+        assert!(client.is_opted_out(&user));
+
+        client.opt_in(&user);
+        assert!(!client.is_opted_out(&user));
+    }
+
+    // ── opted-out user cannot have a wrap minted (error #15) ─────────────────
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #15)")]
+    fn test_opted_out_user_mint_rejected() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        env.mock_all_auths();
+
+        let user = Address::generate(&env);
+        let archetype = symbol_short!("arch");
+        let hash = BytesN::from_array(&env, &[1u8; 32]);
+        let period = 202501u64;
+
+        client.opt_out(&user);
+
+        let sig = make_sig(&env, &signing_key, &contract_id, &user, period, &archetype, &hash);
+        client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
+    }
+
+    // ── after opt-in, minting succeeds again ─────────────────────────────────
+
+    #[test]
+    fn test_opt_in_re_enables_mint() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        env.mock_all_auths();
+
+        let user = Address::generate(&env);
+        let archetype = symbol_short!("arch");
+        let hash = BytesN::from_array(&env, &[2u8; 32]);
+        let period = 202502u64;
+
+        // Opt out then back in.
+        client.opt_out(&user);
+        client.opt_in(&user);
+        assert!(!client.is_opted_out(&user));
+
+        let sig = make_sig(&env, &signing_key, &contract_id, &user, period, &archetype, &hash);
+        client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
+        assert!(client.get_wrap(&user, &period).is_some());
+    }
+
+    // ── opt_out requires the user's own auth ─────────────────────────────────
+
+    #[test]
+    #[should_panic]
+    fn test_opt_out_requires_user_auth() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[8u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        // No mock_all_auths — auth must be required.
+
+        let user = Address::generate(&env);
+        client.opt_out(&user); // must panic — no auth provided
+    }
+
+    // ── opt_in requires the user's own auth ──────────────────────────────────
+
+    #[test]
+    #[should_panic]
+    fn test_opt_in_requires_user_auth() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        // No mock_all_auths — auth must be required.
+
+        let user = Address::generate(&env);
+        client.opt_in(&user); // must panic — no auth provided
+    }
+
+    // ── admin auth alone cannot satisfy opt_out for a different user ─────────
+
+    #[test]
+    #[should_panic]
+    fn test_admin_cannot_opt_out_another_user() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[10u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+
+        // Only mock the admin's auth, not the user's.
+        env.mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "opt_out",
+                args: soroban_sdk::vec![&env].into(),
+            },
+        }]);
+
+        let user = Address::generate(&env);
+        client.opt_out(&user); // must panic — admin auth != user auth
+    }
+
+    // ── non-opted-out user can mint normally ────────────────────────────────
+
+    #[test]
+    fn test_mint_succeeds_when_not_opted_out() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        env.mock_all_auths();
+
+        let user = Address::generate(&env);
+        let archetype = symbol_short!("arch");
+        let hash = BytesN::from_array(&env, &[3u8; 32]);
+        let period = 202503u64;
+
+        assert!(!client.is_opted_out(&user));
+
+        let sig = make_sig(&env, &signing_key, &contract_id, &user, period, &archetype, &hash);
+        client.mint_wrap(&user, &period, &archetype, &hash, &CURRENT_PAYLOAD_VERSION, &sig);
+        assert!(client.get_wrap(&user, &period).is_some());
+    }
+
+    // ── multiple opt-out / opt-in cycles are idempotent ─────────────────────
+
+    #[test]
+    fn test_multiple_opt_cycles_are_idempotent() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StellarWrapContract);
+        let client = StellarWrapContractClient::new(&env, &contract_id);
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &admin_pubkey);
+        env.mock_all_auths();
+
+        let user = Address::generate(&env);
+
+        // Double opt-out does not change behavior.
+        client.opt_out(&user);
+        client.opt_out(&user);
+        assert!(client.is_opted_out(&user));
+
+        // Double opt-in does not change behavior.
+        client.opt_in(&user);
+        client.opt_in(&user);
+        assert!(!client.is_opted_out(&user));
+    }
+}

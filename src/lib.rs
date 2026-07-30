@@ -279,6 +279,31 @@ impl StellarWrapContract {
         queries::decimals(e)
     }
 
+    /// Set the caller's opt-out flag, preventing any future wraps from being
+    /// minted for them. Only the user themselves can call this.
+    pub fn opt_out(e: Env, user: Address) {
+        user.require_auth();
+        let key = crate::storage_types::DataKey::OptOut(user);
+        let ttl = 17280 * 365; // ~1 year in ledgers
+        e.storage().persistent().set(&key, &true);
+        e.storage().persistent().extend_ttl(&key, ttl, ttl);
+    }
+
+    /// Clear the caller's opt-out flag, allowing future wraps to be minted for
+    /// them again. Only the user themselves can call this.
+    pub fn opt_in(e: Env, user: Address) {
+        user.require_auth();
+        let key = crate::storage_types::DataKey::OptOut(user);
+        e.storage().persistent().remove(&key);
+    }
+
+    /// Returns `true` if the user has opted out of future mints.
+    pub fn is_opted_out(e: Env, user: Address) -> bool {
+        e.storage()
+            .persistent()
+            .has(&crate::storage_types::DataKey::OptOut(user))
+    }
+
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
         revoke::revoke_wrap(e, user, period, reason_hash);
     }

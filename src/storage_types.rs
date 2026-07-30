@@ -118,6 +118,9 @@ pub enum DataKey {
     Symbol,
     /// Emergency pause state flag.
     Paused,
+    /// User-controlled opt-out flag. Present means the user has opted out of
+    /// future mints; absent means minting is allowed.
+    OptOut(Address),
 
     // New instance storage keys for accounting / fee system:
     /// Estimated persistent storage bytes used by this contract (instance-level)

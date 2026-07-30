@@ -42,6 +42,15 @@ pub(crate) fn mint_wrap(
 ) {
     crate::admin::require_not_paused(&e);
     user.require_auth();
+
+    // Reject minting for users who have explicitly opted out.
+    if e.storage()
+        .persistent()
+        .has(&DataKey::OptOut(user.clone()))
+    {
+        panic_with_error!(e, ContractError::UserOptedOut);
+    }
+
     validate_period(&e, period);
     validate_payload_version(&e, payload_version);
 

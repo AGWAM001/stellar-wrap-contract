@@ -18,4 +18,5 @@ pub enum ContractError {
     Paused = 12,
     ArithmeticOverflow = 13,
     InvalidFeeParams = 14,
+    UserOptedOut = 15,
 }
