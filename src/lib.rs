@@ -233,6 +233,10 @@ impl StellarWrapContract {
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
         revoke::revoke_wrap(e, user, period, reason_hash);
     }
+
+    pub fn total_revoked(e: Env) -> u64 {
+        queries::total_revoked(e)
+    }
 }
 
 #[cfg(test)]

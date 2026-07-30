@@ -66,6 +66,11 @@ pub(crate) fn revoke_wrap(
         e.storage().persistent().remove(&latest_key);
     }
 
+    let total_revoked_key = DataKey::TotalRevoked;
+    let current_total: u64 = e.storage().instance().get(&total_revoked_key).unwrap_or(0);
+    let next_total = current_total + 1;
+    e.storage().instance().set(&total_revoked_key, &next_total);
+
     // Emit revoke event with reason_hash for audit trail
     e.events()
         .publish((symbol_short!("revoke"), user, period), reason_hash);

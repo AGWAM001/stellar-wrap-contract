@@ -215,6 +215,59 @@ fn test_balance_of_and_count() {
 }
 
 #[test]
+fn test_revoke_wrap_increments_total_revoked() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[4u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
+    );
+
+    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    assert_eq!(client.total_revoked(), 0);
+
+    client.revoke_wrap(&user, &period);
+
+    assert_eq!(client.total_revoked(), 1);
+    assert_eq!(client.balance_of(&user), 0);
+    assert!(client.get_wrap(&user, &period).is_none());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn test_revoke_wrap_nonexistent_wrap_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    client.revoke_wrap(&user, &202401);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #1)")]
 fn test_initialize_twice_fails() {
     let env = Env::default();

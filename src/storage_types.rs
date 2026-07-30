@@ -92,4 +92,6 @@ pub enum DataKey {
     Paused,
     /// Stores the total number of successful wrap mints across all users.
     TotalWrapCount,
+    /// Stores the total number of wrap records revoked on-chain.
+    TotalRevoked,
 }
