@@ -1,28 +1,46 @@
-# Storage Architecture (Soroban)
+# Storage accounting and algorithmic fee
 
-This document describes how this contract lays out Soroban storage keys, which data lives in each storage tier, and how TTL (time-to-live) affects access and cost.
+This contract now keeps a conservative estimated count of persistent storage bytes in instance storage and exposes an on-chain algorithmic fee computed from that estimate.
 
-> **Key idea:** The contract uses **three Soroban storage tiers**:
->
-> - **Instance storage**: lives as long as the contract instance
-> - **Persistent storage**: user/account state that can expire, but is renewed (~1 year)
-> - **Temporary storage**: invocation-scoped reentrancy guard (auto-cleaned)
+Key details:
+
+- DataKey::StorageBytes (instance) stores a u64 estimate of persistent bytes.
+- DataKey::FeeParams (instance) stores a FeeParams struct with these fields:
+  - base_fee: i128
+  - per_kib_fee: i128
+  - scale_step_kib: u64
+  - max_fee: i128
+
+Fee formula (on-chain):
+
+fee = min(max_fee, base_fee + per_kib_fee * ceil(storage_bytes / 1024 / scale_step_kib))
+
+Accounting updates:
+
+- mint_wrap() increments estimate when creating new persistent entries (wrap record, wrap count, latest, user_periods) using conservative constants.
+- revoke_wrap() decrements estimate for the removed wrap and for the wrap-count entry when it reaches zero.
 
 ---
 
-## 1) Storage tiers used by the contract
-
-### Instance storage (`e.storage().instance()`)
+### Temporary storage (`e.storage().temporary()`)
 **What lives here**
-- `DataKey::Admin` → `Address`
-- `DataKey::AdminPubKey` → `BytesN<32>`
+
+Non-critical global state that has sensible defaults when absent:
+- `DataKey::TotalRevoked` → `u64` (default: `0`)
+- `DataKey::Paused` → `bool` (default: unpaused)
+- `DataKey::Name` → `String` (default: `"Stellar Wrap Registry"`)
+- `DataKey::Symbol` → `String` (default: `"WRAP"`)
 
 **TTL behavior**
-- Instance storage is shared at the contract instance level.
-- This contract does **not** call `extend_ttl()` for these entries, and relies on Soroban instance lifecycle.
+- Temporary storage entries are extended to **~1 day** (17,280 ledgers) on every write.
+- When entries expire, the contract gracefully falls back to hardcoded defaults.
+- This dramatically reduces state rent fees compared to storing in Instance.
 
-**Cost implication**
-- Cheap / fixed: these entries exist once per contract instance.
+**Why temporary storage?**
+- These entries are non-critical: the contract functions correctly with or without them.
+- Temporary storage has the lowest state rent cost of all three tiers.
+- If an admin customizes `Name`/`Symbol` and the entry expires, it simply reverts to the default.
+- `TotalRevoked` is an informational counter that can be derived from revoke events if lost.
 
 ---
 
@@ -60,36 +78,41 @@ let ttl_one_year = 17280 * 365; // ~1 year in ledgers
 
 ---
 
-### Temporary storage (`e.storage().temporary()`)
-**What lives here**
+### MintGuard (temporary storage)
+
 - `DataKey::MintGuard(Address)` → `bool` (stored as `true`)
 
 This is a mint reentrancy / double-call guard.
 
-**TTL behavior / auto-cleanup**
-- Temporary storage entries are **invocation-scoped** and cleared automatically by Soroban.
-- This contract also removes the guard on successful completion:
+The contract also removes the guard on successful completion:
 
 ```rust
 e.storage().temporary().remove(&guard_key);
 ```
 
-**Why temporary storage?**
-- It is cheaper than persistent storage for a guard that only needs to survive during the current call.
-- If execution panics before removal, the guard does not permanently block future mints—temporary storage will expire/clear.
+If execution panics before removal, the guard does not permanently block future mints—temporary storage will expire/clear.
 
 ---
 
 ## 2) DataKey enum → storage key mapping
 
-The contract defines the following storage key enum:
+The contract defines the following storage key enum with their tier assignments:
 
 - `DataKey::Admin` (instance)
 - `DataKey::AdminPubKey` (instance)
+- `DataKey::PendingAdmin` (instance)
+- `DataKey::MigrationVersion` (instance)
 - `DataKey::Wrap(Address, u64)` (persistent)
 - `DataKey::WrapCount(Address)` (persistent)
 - `DataKey::LatestPeriod(Address)` (persistent)
-- `DataKey::MintGuard(Address)` (temporary)
+- `DataKey::UserPeriods(Address)` (persistent)
+- `DataKey::TotalWrapCount` (persistent)
+- `DataKey::AliasHash(Address)` (persistent)
+- `DataKey::TotalRevoked` (temporary)
+- `DataKey::Paused` (temporary)
+- `DataKey::Name` (temporary)
+- `DataKey::Symbol` (temporary)
+- `DataKey::MintGuard(Address)` (temporary — managed separately)
 
 ```rust
 #[contracttype]
@@ -97,12 +120,22 @@ The contract defines the following storage key enum:
 pub enum DataKey {
     Admin,
     AdminPubKey,
+    PendingAdmin,
     Wrap(Address, u64),
     WrapCount(Address),
     LatestPeriod(Address),
-    MintGuard(Address),
+    MigrationVersion,
+    UserPeriods(Address),
+    Paused,
+    TotalWrapCount,
+    TotalRevoked,
+    AliasHash(Address),
+    Name,
+    Symbol,
 }
 ```
+
+> **Note:** The `MintGuard` key is managed separately from the `DataKey` enum using ephemeral temporary storage keys scoped to each mint invocation.
 
 > **Note on key serialization:** `DataKey` is annotated with `#[contracttype]`. Soroban serializes `contracttype` enums into a canonical storage-key representation (using enum discriminants/variants plus the associated values).
 
@@ -214,6 +247,8 @@ Assume a single user address `U` and that the user has `N` distinct wraps (perio
 Instance
 - Admin
 - AdminPubKey
+- PendingAdmin
+- MigrationVersion
 ```
 
 ### Temporary storage (during mint call)
@@ -305,9 +340,18 @@ So:
 |---|---|---|---|---|
 | `Admin` | instance | `Address` | shared instance lifecycle | set once during `initialize()` |
 | `AdminPubKey` | instance | `BytesN<32>` | shared instance lifecycle | set once during `initialize()` |
+| `PendingAdmin` | instance | `Address` | shared instance lifecycle | used for two-step admin transfer |
+| `MigrationVersion` | instance | `u32` | shared instance lifecycle | tracks applied storage migrations |
 | `Wrap(Address, u64)` | persistent | `WrapRecord` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | exists per `(user, period)`; duplicated check uses `has()` |
 | `WrapCount(Address)` | persistent | `u32` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | incremented each `mint_wrap()` |
 | `LatestPeriod(Address)` | persistent | `u64` | `extend_ttl(..., ttl_one_year, ttl_one_year)` only when updated | updated when `period` increases |
+| `UserPeriods(Address)` | persistent | `Vec<u64>` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | tracks all periods for a user |
+| `TotalWrapCount` | persistent | `u32` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | global count across all users |
+| `AliasHash(Address)` | persistent | `BytesN<32>` | `extend_ttl(..., ttl_one_year, ttl_one_year)` | user-controlled alias hash |
+| `TotalRevoked` | temporary | `u64` | `extend_ttl(..., ttl_temp, ttl_temp)` | global revoke counter; defaults to 0 |
+| `Paused` | temporary | `bool` | `extend_ttl(..., ttl_temp, ttl_temp)` | contract pause flag; defaults to unpaused |
+| `Name` | temporary | `String` | `extend_ttl(..., ttl_temp, ttl_temp)` | token name; defaults to "Stellar Wrap Registry" |
+| `Symbol` | temporary | `String` | `extend_ttl(..., ttl_temp, ttl_temp)` | token symbol; defaults to "WRAP" |
 | `MintGuard(Address)` | temporary | `bool` (stored as `true`) | auto-cleaned (temporary TTL) | removed explicitly on success |
 
 ---
@@ -318,3 +362,4 @@ So:
 - Persistent writes + TTL extension: `src/lib.rs` (`mint_wrap`, `update_wrap`, `extend_ttl`)
 - Temporary guard: `src/lib.rs` (`mint_wrap`)
 
+- Because Soroban does not expose raw ledger storage size to contracts, this approach uses contract-side accounting and conservative estimates. To bootstrap existing deployments, use an admin migration that recomputes storage_bytes by scanning known indexes in bounded chunks (not provided here).

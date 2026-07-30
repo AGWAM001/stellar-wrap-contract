@@ -14,22 +14,32 @@
 
 #![no_std]
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol, Vec,
+};
 
 mod admin;
 mod alias;
 mod errors;
+mod events;
 mod mint;
+mod oracle;
 mod queries;
 mod revoke;
-mod signature;
+pub mod signature;
+mod storage_accounting;
+mod token;
+mod storage_accounting;
 mod storage_types;
+mod transfer;
 
-pub use errors::ContractError;
-pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use mint::CURRENT_PAYLOAD_VERSION;
+pub use oracle::DataHashOracle;
+pub use storage_types::{ContractHealth, DataKey, TransferFeeConfig, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use token::TokenInterface;
 
 #[contract]
 pub struct StellarWrapContract;
@@ -44,8 +54,25 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+    /// Configures the token-denominated fee charged by `transfer_wrap`.
+    ///
+    /// Only the current admin may update the configuration. An amount of zero
+    /// enables fee-free transfers without removing the configured token and
+    /// recipient.
+    pub fn set_transfer_fee(e: Env, token: Address, recipient: Address, amount: i128) {
+        admin::set_transfer_fee(e, token, recipient, amount);
+    }
+
+    pub fn pause(e: Env) {
+        admin::set_pause(e, true);
+    }
+
     pub fn unpause(e: Env) {
-        admin::unpause(e);
+        admin::set_pause(e, false);
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        admin::is_paused(&e)
     }
 
     /// Records that the storage migration `version` has been applied.
@@ -95,15 +122,33 @@ impl StellarWrapContract {
         payload_version: u32,
         signature: BytesN<64>,
     ) {
-        mint::mint_wrap(e, user, period, archetype, data_hash, payload_version, signature);
+        mint::mint_wrap(
+            e,
+            user,
+            period,
+            archetype,
+            data_hash,
+            payload_version,
+            signature,
+        );
     }
 
-    pub fn transition_wrap_state(
-        e: Env,
-        user: Address,
-        period: u64,
-        next_state: WrapState,
-    ) {
+    /// Transfers one wrap record and atomically charges the configured fee.
+    ///
+    /// The current owner (`from`) must authorize the invocation. The record is
+    /// moved only if fee payment succeeds; any token-contract failure rolls the
+    /// entire invocation back.
+    pub fn transfer_wrap(e: Env, from: Address, to: Address, period: u64) {
+        transfer::transfer_wrap(e, from, to, period);
+    }
+
+    /// Backfills the ownership-period index for records minted before transfer
+    /// support was deployed. Admin-only and callable once per user.
+    pub fn backfill_wrap_periods(e: Env, user: Address, periods: Vec<u64>) {
+        transfer::backfill_wrap_periods(e, user, periods);
+    }
+
+    pub fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
         mint::transition_wrap_state(e, user, period, next_state);
     }
 
@@ -118,10 +163,6 @@ impl StellarWrapContract {
         queries::get_mint_timestamp(e, user, period)
     }
 
-    pub fn balance_of(e: Env, user: Address) -> i128 {
-        queries::balance_of(e, user)
-    }
-
     pub fn total_wrap_count(e: Env) -> u32 {
         queries::total_wrap_count(e)
     }
@@ -130,11 +171,24 @@ impl StellarWrapContract {
         queries::verify_data(e, user, period, data)
     }
 
+    /// Asks an external oracle contract whether `data_hash` is recognized.
+    ///
+    /// The oracle must expose `verify_data_hash(BytesN<32>) -> bool`.
+    /// Oracle invocation and ABI errors propagate to the caller.
+    pub fn verify_with_oracle(e: Env, oracle: Address, data_hash: BytesN<32>) -> bool {
+        oracle::verify_data_hash(&e, &oracle, &data_hash)
+    }
+
     pub fn get_latest_wrap(e: Env, user: Address) -> Option<WrapRecord> {
         queries::get_latest_wrap(e, user)
     }
 
-    pub fn get_wraps(e: Env, user: Address, start: u32, limit: u32) -> soroban_sdk::Vec<WrapRecord> {
+    pub fn get_wraps(
+        e: Env,
+        user: Address,
+        start: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<WrapRecord> {
         queries::get_wraps(e, user, start, limit)
     }
 
@@ -240,6 +294,10 @@ impl StellarWrapContract {
         queries::get_admin(e)
     }
 
+    pub fn get_transfer_fee(e: Env) -> Option<TransferFeeConfig> {
+        queries::get_transfer_fee(e)
+    }
+
     pub fn health(e: Env) -> ContractHealth {
         queries::health(e)
     }
@@ -259,19 +317,22 @@ impl StellarWrapContract {
     }
 
     pub fn name(e: Env) -> String {
-        queries::name(e)
+        token::name(e)
     }
 
     pub fn symbol(e: Env) -> String {
-        queries::symbol(e)
+        token::symbol(e)
     }
 
     pub fn decimals(e: Env) -> u32 {
-        queries::decimals(e)
+        token::decimals(e)
     }
-
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
         revoke::revoke_wrap(e, user, period, reason_hash);
+    }
+
+    pub fn burn_wrap(e: Env, user: Address, period: u64) {
+        burn::burn_wrap(e, user, period);
     }
 
     pub fn total_revoked(e: Env) -> u64 {
@@ -279,9 +340,64 @@ impl StellarWrapContract {
     }
 }
 
+/// Token interface implementation — generated as contract functions via
+/// `#[contractimpl]` so clients can call `name`, `symbol`, `decimals`,
+/// and `balance_of` directly.
+#[contractimpl]
+impl token::TokenInterface for StellarWrapContract {
+    fn name(e: Env) -> String {
+        queries::name(e)
+    }
+
+    fn symbol(e: Env) -> String {
+        queries::symbol(e)
+    }
+
+    fn decimals(e: Env) -> u32 {
+        queries::decimals(e)
+    }
+
+    fn balance_of(e: Env, user: Address) -> i128 {
+        queries::balance_of(e, user)
+    }
+
+    /// Returns estimated current persistent storage bytes used by the contract.
+    pub fn storage_bytes(e: Env) -> u64 {
+        storage_accounting::get_storage_bytes(&e)
+    }
+
+    /// Returns the computed current fee according to the on-chain params.
+    pub fn current_fee(e: Env) -> i128 {
+        storage_accounting::compute_current_fee(&e)
+    }
+
+    /// Admin: set fee params.
+    pub fn set_fee_params(e: Env, params: storage_types::FeeParams) {
+        storage_accounting::set_fee_params(&e, params);
+    }
+
+    /// View: fee params
+    pub fn fee_params(e: Env) -> storage_types::FeeParams {
+        storage_accounting::get_fee_params(&e)
+    }
+}
+
+// #[cfg(test)]
+// mod security_test;
+// #[cfg(test)]
+// mod test;
+// #[cfg(test)]
+// mod test_utils;
+
+#[cfg(test)]
+mod balance_of_test;
+#[cfg(test)]
+mod oracle_test;
 #[cfg(test)]
 mod security_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
 mod test_utils;
+#[cfg(test)]
+mod transfer_test;
