@@ -24,10 +24,12 @@ use soroban_sdk::{
 mod admin;
 mod alias;
 mod errors;
+mod events;
 mod mint;
 mod oracle;
 mod queries;
 mod revoke;
+mod events;
 pub mod signature;
 mod storage_accounting;
 mod storage_types;

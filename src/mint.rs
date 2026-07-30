@@ -1,5 +1,6 @@
-use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env, Symbol};
+use soroban_sdk::{panic_with_error, Address, BytesN, Env, Symbol};
 
+use crate::events::{MintEventData, MintEventType};
 use crate::storage_accounting;
 use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
@@ -145,8 +146,10 @@ pub(crate) fn mint_wrap(
         );
     }
 
-    e.events()
-        .publish((symbol_short!("mint"), user, period), archetype);
+    e.events().publish(
+        (MintEventType::Mint.to_symbol(&e), user.clone(), period),
+        MintEventData::Mint(user, period, archetype),
+    );
 }
 
 pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
@@ -170,6 +173,8 @@ pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_sta
         .persistent()
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
-    e.events()
-        .publish((symbol_short!("trans"), user, period), next_state);
+    e.events().publish(
+        (MintEventType::Transition.to_symbol(&e), user.clone(), period),
+        MintEventData::Transition(user, period, next_state),
+    );
 }
