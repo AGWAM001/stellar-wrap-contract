@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-.PHONY: build test fmt fmt-check lint clean deploy-testnet wasm-build docker-build docker-build-verify coverage
-=======
-.PHONY: build test fmt fmt-check lint doc clean deploy-testnet wasm-build docker-build docker-build-verify
->>>>>>> ci/add-cargo-doc-check
+.PHONY: build test fuzz fuzz-build fmt fmt-check lint doc clean deploy-testnet wasm-build docker-build docker-build-verify coverage
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +30,19 @@ test-verbose:
 coverage:
 	cargo tarpaulin --config tarpaulin.toml
 	@echo "Coverage report written to coverage/tarpaulin-report.html"
+
+## fuzz-build: Build the mint_wrap cargo-fuzz target (requires nightly + cargo-fuzz + rust-src)
+fuzz-build:
+	cargo +nightly fuzz build --sanitizer=thread --build-std fuzz_mint_wrap
+
+## fuzz: Run the mint_wrap fuzzer (Ctrl-C to stop; use FUZZ_SECONDS=N for a timed run)
+##   Requires: rustup component add rust-src --toolchain nightly
+fuzz:
+	@if [ -n "$(FUZZ_SECONDS)" ]; then \
+		cargo +nightly fuzz run --sanitizer=thread --build-std fuzz_mint_wrap -- -max_total_time=$(FUZZ_SECONDS); \
+	else \
+		cargo +nightly fuzz run --sanitizer=thread --build-std fuzz_mint_wrap; \
+	fi
 
 # ── Format ───────────────────────────────────────────────────────────────────
 
