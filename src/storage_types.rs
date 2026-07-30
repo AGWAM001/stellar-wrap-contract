@@ -98,4 +98,10 @@ pub enum DataKey {
     TotalRevoked,
     /// Stores a user-controlled 32-byte alias hash for privacy-preserving profile display.
     AliasHash(Address),
+    /// Stores the token display name, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::name`.
+    Name,
+    /// Stores the token symbol, if overridden by an admin.
+    /// Falls back to a hardcoded default when unset — see `queries::symbol`.
+    Symbol,
 }

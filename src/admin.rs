@@ -127,4 +127,26 @@ pub(crate) fn get_pending_admin(e: Env) -> Option<Address> {
     e.storage().instance().get(&DataKey::PendingAdmin)
 }
 
+pub(crate) fn set_name(e: Env, name: soroban_sdk::String) {
+    let current_admin: Address = e
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
+
+    current_admin.require_auth();
+    e.storage().instance().set(&DataKey::Name, &name);
+}
+
+pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
+    let current_admin: Address = e
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
+
+    current_admin.require_auth();
+    e.storage().instance().set(&DataKey::Symbol, &symbol);
+}
+
 

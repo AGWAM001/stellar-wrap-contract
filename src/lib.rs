@@ -78,6 +78,14 @@ impl StellarWrapContract {
         admin::get_pending_admin(e)
     }
 
+    pub fn set_name(e: Env, name: String) {
+        admin::set_name(e, name);
+    }
+
+    pub fn set_symbol(e: Env, symbol: String) {
+        admin::set_symbol(e, symbol);
+    }
+
     pub fn mint_wrap(
         e: Env,
         user: Address,
