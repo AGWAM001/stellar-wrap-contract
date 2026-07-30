@@ -1,4 +1,4 @@
-use soroban_sdk::{xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol};
+use soroban_sdk::{contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol};
 
 use crate::ContractError;
 
@@ -9,6 +9,17 @@ use crate::ContractError;
 /// ambiguity if the same key is reused for other Soroban contracts or future
 /// signing schemes.
 pub const MINT_DOMAIN_SEPARATOR: &[u8; 15] = b"stellar-wrap-v1";
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MintPayload {
+    pub archetype: Symbol,
+    pub contract_id: Address,
+    pub data_hash: BytesN<32>,
+    pub payload_version: u32,
+    pub period: u64,
+    pub user: Address,
+}
 
 /// Construct the canonical mint payload that is signed by the admin.
 ///
@@ -26,12 +37,17 @@ pub fn construct_mint_payload(
 ) -> Bytes {
     let mut payload = Bytes::new(e);
     payload.append(&Bytes::from_array(e, MINT_DOMAIN_SEPARATOR));
-    payload.append(&payload_version.to_xdr(e));
-    payload.append(&contract_id.to_xdr(e));
-    payload.append(&user.clone().to_xdr(e));
-    payload.append(&period.to_xdr(e));
-    payload.append(&archetype.clone().to_xdr(e));
-    payload.append(&data_hash.clone().to_xdr(e));
+    
+    let typed_payload = MintPayload {
+        archetype: archetype.clone(),
+        contract_id: contract_id.clone(),
+        data_hash: data_hash.clone(),
+        payload_version,
+        period,
+        user: user.clone(),
+    };
+    
+    payload.append(&typed_payload.to_xdr(e));
     payload
 }
 
@@ -118,12 +134,16 @@ mod tests {
 
         let mut expected = Bytes::new(&env);
         expected.append(&Bytes::from_array(&env, MINT_DOMAIN_SEPARATOR));
-        expected.append(&1u32.to_xdr(&env));
-        expected.append(&contract_id.to_xdr(&env));
-        expected.append(&user.clone().to_xdr(&env));
-        expected.append(&period.to_xdr(&env));
-        expected.append(&archetype.clone().to_xdr(&env));
-        expected.append(&data_hash.clone().to_xdr(&env));
+        
+        let typed_payload = MintPayload {
+            archetype: archetype.clone(),
+            contract_id: contract_id.clone(),
+            data_hash: data_hash.clone(),
+            payload_version: 1,
+            period,
+            user: user.clone(),
+        };
+        expected.append(&typed_payload.to_xdr(&env));
 
         assert_eq!(payload, expected);
     }
