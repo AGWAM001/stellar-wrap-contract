@@ -31,6 +31,8 @@ mod queries;
 mod revoke;
 pub mod signature;
 mod storage_accounting;
+mod token;
+mod storage_accounting;
 mod storage_types;
 mod transfer;
 
@@ -314,6 +316,17 @@ impl StellarWrapContract {
         alias::get_alias_hash(e, user)
     }
 
+    pub fn name(e: Env) -> String {
+        token::name(e)
+    }
+
+    pub fn symbol(e: Env) -> String {
+        token::symbol(e)
+    }
+
+    pub fn decimals(e: Env) -> u32 {
+        token::decimals(e)
+    }
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
         revoke::revoke_wrap(e, user, period, reason_hash);
     }
