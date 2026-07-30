@@ -6,12 +6,13 @@ use crate::storage_accounting;
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
 pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
+pub const MAX_PERIOD_YEAR: u64 = 2100;
 
 fn validate_period(e: &Env, period: u64) {
     let year = period / 100;
     let month = period % 100;
 
-    if !(2024..=2100).contains(&year) || !(1..=12).contains(&month) {
+    if !(2024..=MAX_PERIOD_YEAR).contains(&year) || !(1..=12).contains(&month) {
         panic_with_error!(e, ContractError::InvalidPeriod);
     }
 }
