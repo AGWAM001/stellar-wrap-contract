@@ -810,6 +810,79 @@ fn test_stress_mint_100_plus_unique_users() {
 }
 
 #[test]
+fn test_non_monotonic_period_mints_across_users() {
+    // Two independent users mint periods in mixed, out-of-order sequences.
+    // Each user's latest period and balance must be tracked independently,
+    // and must reflect the highest period that user minted regardless of the
+    // order in which the mints happened (or how they interleave with the
+    // other user's mints).
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[14u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+
+    // Helper to sign and mint in one step.
+    let mint = |user: &Address, period: u64, tag: u8| {
+        let hash = BytesN::from_array(&env, &[tag; 32]);
+        let sig = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            user,
+            period,
+            &archetype,
+            &hash,
+        );
+        client.mint_wrap(user, &period, &archetype, &hash, &sig);
+    };
+
+    // Interleaved, non-monotonic ordering across both users:
+    //   user_a: 202406 (high first), then 202401 (lower), then 202404 (middle)
+    //   user_b: 202402 (low first), then 202412 (highest), then 202403
+    mint(&user_a, 202406, 1); // a's latest -> 202406
+    mint(&user_b, 202402, 2); // b's latest -> 202402
+    mint(&user_a, 202401, 3); // older than a's latest; latest stays 202406
+    mint(&user_b, 202412, 4); // b's latest -> 202412
+    mint(&user_a, 202404, 5); // between a's periods; latest stays 202406
+    mint(&user_b, 202403, 6); // older than b's latest; latest stays 202412
+
+    // Each user's latest period is independent and equals their own maximum.
+    let latest_a = client.get_latest_wrap(&user_a).unwrap();
+    let latest_b = client.get_latest_wrap(&user_b).unwrap();
+    assert_eq!(latest_a.period, 202406);
+    assert_eq!(latest_b.period, 202412);
+
+    // The latest record also carries that user's own data, not the other's.
+    assert_eq!(latest_a.data_hash, BytesN::from_array(&env, &[1u8; 32]));
+    assert_eq!(latest_b.data_hash, BytesN::from_array(&env, &[4u8; 32]));
+
+    // Balances (mint counts) are independent per user.
+    assert_eq!(client.balance_of(&user_a), 3);
+    assert_eq!(client.balance_of(&user_b), 3);
+
+    // Every individual period a user minted is retrievable and isolated to
+    // that user; the other user never has it.
+    for period in [202406u64, 202401, 202404] {
+        assert!(client.get_wrap(&user_a, &period).is_some());
+        assert!(client.get_wrap(&user_b, &period).is_none());
+    }
+    for period in [202402u64, 202412, 202403] {
+        assert!(client.get_wrap(&user_b, &period).is_some());
+        assert!(client.get_wrap(&user_a, &period).is_none());
+    }
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #2)")]
 fn test_mint_wrap_before_init_fails() {
     let env = Env::default();
