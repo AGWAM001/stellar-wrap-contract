@@ -451,3 +451,20 @@ Ensure `wasm32-unknown-unknown` is the active target and no host-specific native
 ## Mainnet deployment
 
 Before deploying to mainnet, review the release checklist in [MAINNET_RELEASE_CHECKLIST.md](MAINNET_RELEASE_CHECKLIST.md). It covers tests, optimized builds, release artifact hash verification, signer backup, initialization, and rollback guidance.
+### Gas Analysis
+
+The contract includes gas analysis tests that measure CPU instructions and memory usage
+of mint operations. These tests always run assertions on resource bounds, but detailed
+budget tables are suppressed during normal test runs to keep CI output clean.
+
+To run tests with full gas budget reporting:
+
+```bash
+make test-gas-report
+# or
+SOROBAN_GAS_REPORT=1 cargo test -- --nocapture
+```
+
+> **Note:** The Soroban test framework automatically creates snapshot files under
+> `test_snapshots/` during test execution. These are already in `.gitignore` and
+> can be cleaned up with `make clean-snapshots`.

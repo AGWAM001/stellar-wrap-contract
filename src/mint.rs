@@ -11,7 +11,7 @@ fn validate_period(e: &Env, period: u64) {
     let year = period / 100;
     let month = period % 100;
 
-    if year < 2024 || year > 2100 || month < 1 || month > 12 {
+    if !(2024..=2100).contains(&year) || !(1..=12).contains(&month) {
         panic_with_error!(e, ContractError::InvalidPeriod);
     }
 }

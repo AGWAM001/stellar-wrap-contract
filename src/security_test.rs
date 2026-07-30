@@ -356,6 +356,10 @@ fn test_gas_analysis_mint_operation() {
     client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
 
     env.budget().print();
+    // Get budget consumption (only when gas reporting is explicitly enabled)
+    if std::env::var("SOROBAN_GAS_REPORT").is_ok() {
+        env.budget().print();
+    }
 
     let cpu_insns = env.budget().cpu_instruction_cost();
     let mem_bytes = env.budget().memory_bytes_cost();
