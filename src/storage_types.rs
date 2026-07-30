@@ -10,6 +10,7 @@ pub enum WrapState {
     Active = 3,
     Archived = 4,
     Cancelled = 5,
+    Expired = 6,
 }
 
 #[contracttype]
@@ -35,6 +36,8 @@ impl WrapLifecycleFSM {
             (WrapState::Pending, WrapState::Cancelled) => true,
             (WrapState::Active, WrapState::Archived) => true,
             (WrapState::Active, WrapState::Cancelled) => true,
+            (WrapState::Draft, WrapState::Expired) => true,
+            (WrapState::Pending, WrapState::Expired) => true,
             _ => false,
         }
     }
@@ -118,6 +121,8 @@ pub enum DataKey {
     Symbol,
     /// Emergency pause state flag.
     Paused,
+    /// Configurable expiration duration (in seconds) for unverified wraps.
+    ExpirationDuration,
 
     // New instance storage keys for accounting / fee system:
     /// Estimated persistent storage bytes used by this contract (instance-level)

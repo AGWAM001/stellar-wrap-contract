@@ -283,6 +283,28 @@ impl StellarWrapContract {
         revoke::revoke_wrap(e, user, period, reason_hash);
     }
 
+    /// Expire an unverified wrap (Draft or Pending) whose expiration deadline has passed.
+    ///
+    /// Callable by anyone — enforces objective time-based criteria using the
+    /// configurable expiration duration. Once expired, the wrap cannot be
+    /// transitioned back to any other state.
+    pub fn expire_wrap(e: Env, user: Address, period: u64) {
+        mint::expire_wrap(e, user, period);
+    }
+
+    /// Admin-only: set the expiration duration (in seconds) for unverified wraps.
+    /// Wraps in Draft or Pending state that remain unverified beyond this duration
+    /// can be expired by anyone via [`expire_wrap`].
+    pub fn set_expiration_duration(e: Env, duration: u64) {
+        mint::set_expiration_duration(&e, duration);
+    }
+
+    /// Returns the configured expiration duration (in seconds) for unverified wraps.
+    /// Defaults to 7 days (604,800 seconds) if not set by the admin.
+    pub fn expiration_duration(e: Env) -> u64 {
+        mint::get_expiration_duration(&e)
+    }
+
     pub fn total_revoked(e: Env) -> u64 {
         queries::total_revoked(e)
     }
@@ -308,6 +330,8 @@ impl StellarWrapContract {
     }
 }
 
+#[cfg(test)]
+mod expiration_test;
 #[cfg(test)]
 mod security_test;
 #[cfg(test)]
