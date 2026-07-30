@@ -1,22 +1,15 @@
 #![cfg(test)]
 
 use super::*;
-use crate::test_utils::sign_payload;
-use ed25519_dalek::SigningKey;
 use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Ledger},
-    Address, BytesN, Env,
-};
-
-
-/// Test 1: Replay Attack Simulation
-/// Ensures that a valid signature cannot be reused for the same period
     xdr::ToXdr,
-    Address, Bytes, BytesN, Env,
+    Address, Bytes, BytesN, Env, Symbol,
 };
+
 
 fn sign_payload(
     env: &Env,
@@ -388,7 +381,6 @@ fn test_gas_analysis_multiple_mints() {
 
     // Perform 5 mints for different periods
     for i in 0..5 {
-    for i in 1..6 {
         let data_hash = BytesN::from_array(&env, &[i as u8; 32]);
         let archetype = symbol_short!("architect");
 
@@ -398,13 +390,7 @@ fn test_gas_analysis_multiple_mints() {
             2 => 202602u64, // February 2026
             3 => 202603u64, // March 2026
             _ => 202604u64, // April 2026
-            1 => 202512u64,
-            2 => 202601u64,
-            3 => 202602u64,
-            4 => 202603u64,
-            _ => 202604u64,
         };
-
         let signature = sign_payload(
             &env,
             &signing_key,

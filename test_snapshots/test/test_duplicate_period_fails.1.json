@@ -27,7 +27,7 @@
                   "bytes": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
                 },
                 {
-                  "bytes": "c0e2450c8c4723d2568f8b928f1a78ea556737c7f3987d193f743e7d66084652df4f02f1c7cde100ee01e80b8123f31f57ee95dbf17a59fc691a6aad35581f02"
+                  "bytes": "16543e534f7cf85d4151ce8d62f08898c8852f3d7f09c497a63d4d48eca948c7266ae06f23dbddf39c47b9f26561e8a88ceab8697782c046c0896c80a3f7910d"
                 }
               ]
             }
@@ -100,6 +100,94 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "TotalWrapCount"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "TotalWrapCount"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "u32": 1
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          6307200
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "UserPeriods"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "UserPeriods"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "vec": [
+                    {
+                      "u64": 202401
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          6307200
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
                   "symbol": "Wrap"
                 },
                 {
@@ -150,6 +238,31 @@
                       },
                       "val": {
                         "bytes": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "fsm"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "state"
+                            },
+                            "val": {
+                              "u32": 3
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "updated_at"
+                            },
+                            "val": {
+                              "u64": 0
+                            }
+                          }
+                        ]
                       }
                     },
                     {
@@ -423,7 +536,7 @@
                   "bytes": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
                 },
                 {
-                  "bytes": "c0e2450c8c4723d2568f8b928f1a78ea556737c7f3987d193f743e7d66084652df4f02f1c7cde100ee01e80b8123f31f57ee95dbf17a59fc691a6aad35581f02"
+                  "bytes": "16543e534f7cf85d4151ce8d62f08898c8852f3d7f09c497a63d4d48eca948c7266ae06f23dbddf39c47b9f26561e8a88ceab8697782c046c0896c80a3f7910d"
                 }
               ]
             }
@@ -512,7 +625,7 @@
                   "bytes": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
                 },
                 {
-                  "bytes": "c0e2450c8c4723d2568f8b928f1a78ea556737c7f3987d193f743e7d66084652df4f02f1c7cde100ee01e80b8123f31f57ee95dbf17a59fc691a6aad35581f02"
+                  "bytes": "16543e534f7cf85d4151ce8d62f08898c8852f3d7f09c497a63d4d48eca948c7266ae06f23dbddf39c47b9f26561e8a88ceab8697782c046c0896c80a3f7910d"
                 }
               ]
             }
@@ -643,7 +756,7 @@
                       "bytes": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
                     },
                     {
-                      "bytes": "c0e2450c8c4723d2568f8b928f1a78ea556737c7f3987d193f743e7d66084652df4f02f1c7cde100ee01e80b8123f31f57ee95dbf17a59fc691a6aad35581f02"
+                      "bytes": "16543e534f7cf85d4151ce8d62f08898c8852f3d7f09c497a63d4d48eca948c7266ae06f23dbddf39c47b9f26561e8a88ceab8697782c046c0896c80a3f7910d"
                     }
                   ]
                 }
