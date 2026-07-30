@@ -21,4 +21,12 @@ pub enum ContractError {
     BatchEmpty = 15,
     BatchTooLarge = 16,
     DuplicateBatchEntry = 17,
+    // Staking errors
+    StakeTooLow = 18,
+    StakeNotFound = 19,
+    StakeCooldownActive = 20,
+    StakeNotUnstaking = 21,
+    StakeCooldownNotElapsed = 22,
+    InvalidStakeConfig = 23,
+    StakeArithmeticOverflow = 24,
 }

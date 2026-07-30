@@ -1,10 +1,14 @@
-use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env, Symbol};
+use soroban_sdk::{panic_with_error, Address, BytesN, Env, Symbol};
 
+use crate::events::{MintEventData, MintEventType};
+use crate::storage_accounting;
 use crate::storage_types::{WrapLifecycleFSM, WrapState};
 use crate::{signature::verify_mint_signature, ContractError, DataKey, WrapRecord};
-use crate::storage_accounting;
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
+/// TTL for temporary storage entries (~1 day in ledgers at 5s/ledger).
+/// Used for non-critical data migrated from Instance to Temporary storage.
+pub(crate) const TTL_TEMP: u32 = 17_280;
 pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 
 fn validate_period(e: &Env, period: u64) {
@@ -28,8 +32,6 @@ fn get_admin_pubkey(e: &Env) -> BytesN<32> {
         .get(&DataKey::AdminPubKey)
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
-
-
 
 pub(crate) fn mint_wrap(
     e: Env,
@@ -70,6 +72,8 @@ pub(crate) fn mint_wrap(
         archetype: archetype.clone(),
         period,
         fsm: WrapLifecycleFSM::new(WrapState::Active, now),
+        description: None,
+        image_url: None,
     };
 
     e.storage().persistent().set(&wrap_key, &record);
@@ -78,10 +82,7 @@ pub(crate) fn mint_wrap(
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     // Account for estimated storage bytes for new wrap record
-    storage_accounting::add_storage_bytes(
-        &e,
-        storage_accounting::estimate_wrap_bytes_new(),
-    );
+    storage_accounting::add_storage_bytes(&e, storage_accounting::estimate_wrap_bytes_new());
 
     // Update wrap count and account for count entry if first insert
     let count_key = DataKey::WrapCount(user.clone());
@@ -132,7 +133,7 @@ pub(crate) fn mint_wrap(
         .persistent()
         .get(&user_periods_key)
         .unwrap_or(soroban_sdk::Vec::new(&e));
-    
+
     if !periods.contains(period) {
         periods.push_back(period);
         e.storage().persistent().set(&user_periods_key, &periods);
@@ -147,8 +148,10 @@ pub(crate) fn mint_wrap(
         );
     }
 
-    e.events()
-        .publish((symbol_short!("mint"), user, period), archetype);
+    e.events().publish(
+        (MintEventType::Mint.to_symbol(&e), user.clone(), period),
+        MintEventData::Mint(user, period, archetype),
+    );
 }
 
 pub const MAX_BATCH_SIZE: u32 = 100;
@@ -296,13 +299,7 @@ pub(crate) fn mint_wrap_batch(
     }
 }
 
-
-pub(crate) fn transition_wrap_state(
-    e: Env,
-    user: Address,
-    period: u64,
-    next_state: WrapState,
-) {
+pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
     crate::admin::require_not_paused(&e);
     user.require_auth();
 
@@ -314,7 +311,7 @@ pub(crate) fn transition_wrap_state(
         .unwrap_or_else(|| panic_with_error!(e, ContractError::WrapNotFound));
 
     let now = e.ledger().timestamp();
-    if !record.fsm.transition_to(next_state.clone(), now) {
+    if !record.fsm.transition_to(next_state, now) {
         panic_with_error!(e, ContractError::InvalidStateTransition);
     }
 
@@ -324,7 +321,7 @@ pub(crate) fn transition_wrap_state(
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     e.events().publish(
-        (symbol_short!("trans"), user, period),
-        next_state,
+        (MintEventType::Transition.to_symbol(&e), user.clone(), period),
+        MintEventData::Transition(user, period, next_state),
     );
 }
