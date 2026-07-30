@@ -1,10 +1,10 @@
 //! On-chain storage accounting + fee function.
 //! Conservative byte estimates are used (see STORAGE.md).
-use soroban_sdk::{Env, panic_with_error};
+use soroban_sdk::{panic_with_error, Env};
 
 use crate::storage_types::FeeParams;
-use crate::DataKey;
 use crate::ContractError;
+use crate::DataKey;
 
 /// Conservative estimates (in bytes) for persistent entries.
 /// These are conservative rounded values to avoid undercharging.
@@ -16,7 +16,10 @@ const ESTIMATE_USERPERIODS_ENTRY_BYTES: u64 = 64; // vector overhead (conservati
 
 /// Read current estimated storage bytes (instance storage)
 pub(crate) fn get_storage_bytes(e: &Env) -> u64 {
-    e.storage().instance().get(&DataKey::StorageBytes).unwrap_or(0u64)
+    e.storage()
+        .instance()
+        .get(&DataKey::StorageBytes)
+        .unwrap_or(0u64)
 }
 
 fn set_storage_bytes(e: &Env, v: u64) {
@@ -70,9 +73,7 @@ pub(crate) fn compute_current_fee(e: &Env) -> i128 {
     let kib = (bytes + 1023) / 1024;
     // steps = kib / scale_step_kib, rounding up
     let steps = (kib + params.scale_step_kib.saturating_sub(1)) / params.scale_step_kib;
-    let increment = params
-        .per_kib_fee
-        .saturating_mul(steps as i128);
+    let increment = params.per_kib_fee.saturating_mul(steps as i128);
     let mut fee = params.base_fee.saturating_add(increment);
     if fee > params.max_fee {
         fee = params.max_fee;
