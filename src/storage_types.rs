@@ -1,4 +1,4 @@
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
 use soroban_sdk::{contracttype, Address, BytesN, Symbol};
 
@@ -28,15 +28,15 @@ impl WrapLifecycleFSM {
     }
 
     pub fn can_transition_to(&self, next: &WrapState) -> bool {
-        match (&self.state, next) {
-            (WrapState::Draft, WrapState::Pending) => true,
-            (WrapState::Draft, WrapState::Cancelled) => true,
-            (WrapState::Pending, WrapState::Active) => true,
-            (WrapState::Pending, WrapState::Cancelled) => true,
-            (WrapState::Active, WrapState::Archived) => true,
-            (WrapState::Active, WrapState::Cancelled) => true,
-            _ => false,
-        }
+        matches!(
+            (&self.state, next),
+            (WrapState::Draft, WrapState::Pending)
+                | (WrapState::Draft, WrapState::Cancelled)
+                | (WrapState::Pending, WrapState::Active)
+                | (WrapState::Pending, WrapState::Cancelled)
+                | (WrapState::Active, WrapState::Archived)
+                | (WrapState::Active, WrapState::Cancelled)
+        )
     }
 
     pub fn transition_to(&mut self, next: WrapState, now: u64) -> bool {
@@ -86,6 +86,17 @@ pub struct FeeParams {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferFeeConfig {
+    /// Amount of `token` charged to the sender for each successful transfer.
+    pub amount: i128,
+    /// Address that receives transfer fees.
+    pub recipient: Address,
+    /// Soroban token contract used to collect fees.
+    pub token: Address,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     /// Stores the address of the admin.
@@ -100,6 +111,13 @@ pub enum DataKey {
     WrapCount(Address),
     /// Stores the latest period minted for a specific user.
     LatestPeriod(Address),
+    /// Stores the periods currently owned by a user so transfers can update
+    /// `LatestPeriod` without scanning contract storage.
+    WrapPeriods(Address),
+    /// Stores the admin-controlled transfer fee configuration.
+    TransferFee,
+    /// Temporary reentrancy guard for transfer calls.
+    TransferGuard,
     /// Stores the highest storage migration version already applied.
     MigrationVersion,
     /// Stores a list of periods a user has minted wraps for.
