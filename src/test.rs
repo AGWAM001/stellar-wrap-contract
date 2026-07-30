@@ -2529,3 +2529,24 @@ fn test_set_alias_hash_requires_auth() {
     let dummy_wasm_hash = BytesN::from_array(&env, &[0xBBu8; 32]);
     client.upgrade(&dummy_wasm_hash);
 }
+
+/// `balance_of` returns zero for any user before `initialize` is called.
+///
+/// This is intentional and safe: `balance_of` is a read-only query that
+/// reads the `WrapCount` persistent storage key for the user, returning
+/// `unwrap_or(0)` when the key is absent. Because the function neither
+/// mutates state nor requires authorization, there is no security risk in
+/// allowing calls before the contract is initialized. The behavior mirrors
+/// standard token semantics where a new address has zero balance.
+#[test]
+fn test_balance_of_before_initialize() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    // Contract is NOT initialized — no admin, no signing key.
+    // balance_of must still return 0 without panicking.
+    assert_eq!(client.balance_of(&user), 0);
+}
