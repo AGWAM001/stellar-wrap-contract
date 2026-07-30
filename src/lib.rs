@@ -327,6 +327,15 @@ impl StellarWrapContract {
     pub fn decimals(e: Env) -> u32 {
         token::decimals(e)
     }
+
+    /// Return the current contract version number.
+    ///
+    /// The version starts at `0` and is incremented automatically each time
+    /// the admin calls [`upgrade`] to replace the contract WASM. This provides
+    /// an on-chain audit trail of upgrade events.
+    pub fn contract_version(e: Env) -> u32 {
+        queries::contract_version(e)
+    }
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
         revoke::revoke_wrap(e, user, period, reason_hash);
     }
