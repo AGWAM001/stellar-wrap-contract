@@ -27,9 +27,11 @@ mod queries;
 mod revoke;
 mod signature;
 mod storage_types;
+mod token;
 
 pub use errors::ContractError;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use token::TokenInterface;
 
 #[contract]
 pub struct StellarWrapContract;
@@ -124,10 +126,6 @@ impl StellarWrapContract {
     /// Returns `None` if no mint has occurred for the given user-period.
     pub fn get_mint_timestamp(e: Env, user: Address, period: u64) -> Option<u64> {
         queries::get_mint_timestamp(e, user, period)
-    }
-
-    pub fn balance_of(e: Env, user: Address) -> i128 {
-        queries::balance_of(e, user)
     }
 
     pub fn total_wrap_count(e: Env) -> u32 {
@@ -266,24 +264,34 @@ impl StellarWrapContract {
         alias::get_alias_hash(e, user)
     }
 
-    pub fn name(e: Env) -> String {
-        queries::name(e)
-    }
-
-    pub fn symbol(e: Env) -> String {
-        queries::symbol(e)
-    }
-
-    pub fn decimals(e: Env) -> u32 {
-        queries::decimals(e)
-    }
-
     pub fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
         revoke::revoke_wrap(e, user, period, reason_hash);
     }
 
     pub fn total_revoked(e: Env) -> u64 {
         queries::total_revoked(e)
+    }
+}
+
+/// Token interface implementation — generated as contract functions via
+/// `#[contractimpl]` so clients can call `name`, `symbol`, `decimals`,
+/// and `balance_of` directly.
+#[contractimpl]
+impl token::TokenInterface for StellarWrapContract {
+    fn name(e: Env) -> String {
+        queries::name(e)
+    }
+
+    fn symbol(e: Env) -> String {
+        queries::symbol(e)
+    }
+
+    fn decimals(e: Env) -> u32 {
+        queries::decimals(e)
+    }
+
+    fn balance_of(e: Env, user: Address) -> i128 {
+        queries::balance_of(e, user)
     }
 }
 
