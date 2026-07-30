@@ -1,10 +1,6 @@
 #![cfg(test)]
 
 use super::*;
-use crate::test_utils::sign_payload;
-use ed25519_dalek::SigningKey;
-use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
-use crate::signature::construct_mint_payload;
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
@@ -12,7 +8,6 @@ use soroban_sdk::{
     xdr::ToXdr,
     Address, Bytes, BytesN, Env, Symbol,
 };
-use crate::mint::CURRENT_PAYLOAD_VERSION;
 
 /// Test 1: Replay Attack Simulation
 /// Ensures that a valid signature cannot be reused for the same period
@@ -424,7 +419,7 @@ fn test_gas_analysis_multiple_mints() {
     env.budget().reset_default();
 
     // Perform 5 mints for different periods
-    for i in 1..=5 {
+    for i in 1..6 {
         let data_hash = BytesN::from_array(&env, &[i as u8; 32]);
         let archetype = symbol_short!("architect");
 

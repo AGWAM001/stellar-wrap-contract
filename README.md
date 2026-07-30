@@ -197,9 +197,20 @@ Successful wrap mints emit one event:
 
 ### Admin update event
 
-The `update_admin` function does **not** emit an event. To track admin changes, indexers should:
-- Query the `get_admin(e)` function periodically
-- Store the current admin address and detect changes across queries
+Successful admin rotations emit one event:
+
+- **Topic 0**: `admin` (`Symbol`)
+- **Topic 1**: `updated` (`Symbol`)
+- **Data**: `(old_admin, new_admin)` (`Address`, `Address`) — previous admin and newly assigned admin
+
+**Example values:**
+- Topic 0: `admin`
+- Topic 1: `updated`
+- Data: `(GOLDADMIN..., GNEWADMIN...)`
+
+**Properties relevant to indexers:**
+- The event is emitted only after the current admin authorizes the call and storage is updated
+- Indexers can track admin rotations without polling `get_admin(e)`, but should still verify the live admin via that query when enforcing privileged flows
 
 ### Revoke event
 
