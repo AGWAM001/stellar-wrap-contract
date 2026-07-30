@@ -85,6 +85,38 @@ pub struct FeeParams {
     pub max_fee: i128,
 }
 
+/// A privileged action that can only take effect after the timelock delay.
+///
+/// Every variant maps to exactly one state mutation applied by
+/// `timelock::execute`. Keeping the set closed means no scheduled operation can
+/// smuggle in a call the contract does not already expose.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TimelockAction {
+    /// Replace the admin address.
+    SetAdmin(Address),
+    /// Rotate the Ed25519 signing key used to validate mint payloads.
+    SetAdminPubKey(BytesN<32>),
+    /// Upgrade the contract WASM to the given hash.
+    Upgrade(BytesN<32>),
+    /// Publish a new off-chain whitelist merkle root.
+    SetWhitelistRoot(BytesN<32>),
+    /// Change the timelock delay itself (seconds).
+    SetTimelockDelay(u64),
+}
+
+/// A scheduled timelock operation awaiting execution.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimelockOperation {
+    /// The action to apply once `eta` is reached.
+    pub action: TimelockAction,
+    /// Ledger timestamp at which the action becomes executable.
+    pub eta: u64,
+    /// Ledger timestamp at which the action was scheduled.
+    pub scheduled_at: u64,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -124,4 +156,15 @@ pub enum DataKey {
     StorageBytes,
     /// Params for the algorithmic fee function (instance-level)
     FeeParams,
+
+    /// Merkle root committing to the off-chain whitelist (instance-level).
+    WhitelistRoot,
+
+    /// Mandatory delay, in seconds, between scheduling and executing a
+    /// privileged action once the timelock is enabled (instance-level).
+    TimelockDelay,
+    /// A scheduled privileged action, keyed by its deterministic operation id.
+    TimelockOp(BytesN<32>),
+    /// Ids of every currently scheduled timelock operation (instance-level).
+    TimelockOps,
 }

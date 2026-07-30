@@ -408,6 +408,8 @@ storage layout must ship as a numbered migration:
 ## Documentation
 
 - [Canonical signed payload encoding](docs/signing-payload.md) — exact field order, XDR encoding rules, and test vectors required by backend signing services (issue #213)
+- [Off-chain whitelisting via Merkle proofs](docs/whitelist-merkle.md) — leaf encoding, tree layout, and the `verify_whitelist` API
+- [Timelock controller for administrative actions](docs/timelock.md) — scheduled admin changes, delay bounds, and the operator runbook
 
 ## Development
 

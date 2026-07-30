@@ -22,15 +22,20 @@ use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, Byte
 mod admin;
 mod alias;
 mod errors;
+mod merkle;
 mod mint;
 mod queries;
 mod revoke;
 mod signature;
 mod storage_types;
 mod storage_accounting;
+mod timelock;
 
 pub use errors::ContractError;
-pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
+pub use storage_types::{
+    ContractHealth, DataKey, TimelockAction, TimelockOperation, WrapLifecycleFSM, WrapRecord,
+    WrapState,
+};
 
 #[contract]
 pub struct StellarWrapContract;
@@ -305,6 +310,99 @@ impl StellarWrapContract {
     /// View: fee params
     pub fn fee_params(e: Env) -> storage_types::FeeParams {
         storage_accounting::get_fee_params(&e)
+    }
+
+    // ---------------------------------------------------------------------
+    // Off-chain whitelisting (merkle)
+    // ---------------------------------------------------------------------
+
+    /// Admin: publish the merkle root of the off-chain whitelist.
+    ///
+    /// Only the 32-byte root is stored; the member list stays off-chain. See
+    /// `docs/whitelist-merkle.md` for the leaf encoding and tree layout.
+    pub fn set_whitelist_root(e: Env, root: BytesN<32>) {
+        merkle::set_whitelist_root(e, root);
+    }
+
+    /// Admin: remove the whitelist root, disabling whitelist checks.
+    pub fn clear_whitelist_root(e: Env) {
+        merkle::clear_whitelist_root(e);
+    }
+
+    /// Return the published whitelist root, or `None` if none is set.
+    pub fn get_whitelist_root(e: Env) -> Option<BytesN<32>> {
+        merkle::get_whitelist_root(&e)
+    }
+
+    /// Return the whitelist leaf hash for `user`, so off-chain tooling can
+    /// verify it builds identical leaves.
+    pub fn whitelist_leaf(e: Env, user: Address) -> BytesN<32> {
+        merkle::compute_whitelist_leaf(&e, &user)
+    }
+
+    /// Verify that `user` belongs to the published whitelist.
+    ///
+    /// `proof` is the list of sibling hashes ordered from the leaf's sibling up
+    /// to the root. Returns `false` for a non-matching proof.
+    ///
+    /// # Panics
+    /// - [`ContractError::MerkleRootNotSet`] if no root has been published.
+    pub fn verify_whitelist(
+        e: Env,
+        user: Address,
+        proof: soroban_sdk::Vec<BytesN<32>>,
+    ) -> bool {
+        merkle::verify_whitelist(e, user, proof)
+    }
+
+    // ---------------------------------------------------------------------
+    // Timelock controller
+    // ---------------------------------------------------------------------
+
+    /// Admin: enable the timelock with `delay_seconds` (1 hour – 30 days).
+    ///
+    /// One-way switch. Afterwards, admin handover, key rotation, WASM upgrades
+    /// and whitelist-root changes must go through `timelock_schedule` +
+    /// `timelock_execute`. See `docs/timelock.md`.
+    pub fn enable_timelock(e: Env, delay_seconds: u64) {
+        timelock::enable(e, delay_seconds);
+    }
+
+    /// Return the configured timelock delay in seconds, or `None` if disabled.
+    pub fn timelock_delay(e: Env) -> Option<u64> {
+        timelock::delay(&e)
+    }
+
+    /// Admin: queue `action` for execution after the timelock delay.
+    /// Returns the operation id.
+    pub fn timelock_schedule(e: Env, action: TimelockAction) -> BytesN<32> {
+        timelock::schedule(e, action)
+    }
+
+    /// Admin: apply a queued operation whose ETA has been reached.
+    pub fn timelock_execute(e: Env, id: BytesN<32>) {
+        timelock::execute(e, id);
+    }
+
+    /// Admin: discard a queued operation before it executes.
+    pub fn timelock_cancel(e: Env, id: BytesN<32>) {
+        timelock::cancel(e, id);
+    }
+
+    /// Return a queued operation by id, or `None` if it is not queued.
+    pub fn timelock_operation(e: Env, id: BytesN<32>) -> Option<TimelockOperation> {
+        timelock::get_operation(&e, id)
+    }
+
+    /// Return the ids of all queued operations.
+    pub fn timelock_pending(e: Env) -> soroban_sdk::Vec<BytesN<32>> {
+        timelock::pending_operations(&e)
+    }
+
+    /// Compute the deterministic operation id for `action` without scheduling
+    /// it, so callers can pre-compute the id they will need to execute.
+    pub fn timelock_operation_id(e: Env, action: TimelockAction) -> BytesN<32> {
+        timelock::operation_id(&e, &action)
     }
 }
 
