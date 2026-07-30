@@ -1,7 +1,7 @@
 use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
-use crate::{ContractError, DataKey, WrapRecord};
 use crate::storage_accounting;
+use crate::{ContractError, DataKey, WrapRecord};
 
 /// Revokes an existing wrap record for the given user and period.
 ///
@@ -23,12 +23,7 @@ use crate::storage_accounting;
 ///   auditors can recompute the hash and confirm it matches the on-chain value.
 /// - If no reason is provided (all-zero hash), the event still emits for
 ///   transparency, but without a link to off-chain evidence.
-pub(crate) fn revoke_wrap(
-    e: Env,
-    user: Address,
-    period: u64,
-    reason_hash: BytesN<32>,
-) {
+pub(crate) fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>) {
     let admin: Address = e
         .storage()
         .instance()
@@ -48,20 +43,17 @@ pub(crate) fn revoke_wrap(
 
     // Decrement the user's wrap count
     let count_key = DataKey::WrapCount(user.clone());
-    let current_count: u32 = e
-        .storage()
-        .persistent()
-        .get(&count_key)
-        .unwrap_or(0);
+    let current_count: u32 = e.storage().persistent().get(&count_key).unwrap_or(0);
 
     if current_count > 0 {
         let next_count = current_count - 1;
-        e.storage()
-            .persistent()
-            .set(&count_key, &next_count);
+        e.storage().persistent().set(&count_key, &next_count);
         // If count became zero, we consider removing the count entry overhead
         if next_count == 0 {
-            storage_accounting::sub_storage_bytes(&e, storage_accounting::estimate_wrapcount_bytes_new());
+            storage_accounting::sub_storage_bytes(
+                &e,
+                storage_accounting::estimate_wrapcount_bytes_new(),
+            );
             // Optionally remove the key entirely (keep it set to 0 for now to match existing behavior)
         }
     }
@@ -74,7 +66,7 @@ pub(crate) fn revoke_wrap(
     }
 
     let total_revoked_key = DataKey::TotalRevoked;
-    let current_total: u64 = e.storage().instance().get(&total_revoked_key).unwrap_or(0);
+    let current_total: u64 = e.storage().temporary().get(&total_revoked_key).unwrap_or(0);
     let next_total = current_total + 1;
     e.storage().instance().set(&total_revoked_key, &next_total);
     e.events()
