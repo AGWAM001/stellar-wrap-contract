@@ -24,6 +24,7 @@ mod errors;
 mod mint;
 mod queries;
 mod revoke;
+mod signature;
 mod storage_types;
 
 pub use errors::ContractError;

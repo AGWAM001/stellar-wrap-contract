@@ -4,6 +4,7 @@ use super::*;
 use crate::test_utils::sign_payload;
 use ed25519_dalek::SigningKey;
 use crate::mint::MINT_SIGNATURE_PAYLOAD_VERSION;
+use crate::signature::construct_mint_payload;
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
     symbol_short,
@@ -16,6 +17,7 @@ use soroban_sdk::{
 /// Ensures that a valid signature cannot be reused for the same period
     xdr::ToXdr,
     Address, Bytes, BytesN, Env,
+    Address, Bytes, BytesN, Env, Symbol,
 };
 
 fn sign_payload(
@@ -34,6 +36,7 @@ fn sign_payload(
     payload.append(&period.to_xdr(env));
     payload.append(&archetype.clone().to_xdr(env));
     payload.append(&data_hash.clone().to_xdr(env));
+    let payload = construct_mint_payload(env, contract, user, period, archetype, data_hash);
 
     let mut out = [0u8; 512];
     let len = payload.len() as usize;
@@ -295,7 +298,6 @@ fn test_cross_contract_replay_protection() {
         &data_hash,
     );
 
-    // Mint successfully on V1
     client_v1.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
 
     let wrap_v1 = client_v1.get_wrap(&user, &period);
@@ -318,6 +320,24 @@ fn test_cross_contract_replay_protection() {
 
     assert!(client_v1.get_wrap(&user, &period).is_some());
     assert!(client_v2.get_wrap(&user, &period).is_some());
+    let payload_v1 =
+        construct_mint_payload(&env, &contract_v1, &user, period, &archetype, &data_hash);
+    let payload_v2 =
+        construct_mint_payload(&env, &contract_v2, &user, period, &archetype, &data_hash);
+    assert_ne!(
+        payload_v1, payload_v2,
+        "Payloads should differ across contract instances"
+    );
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client_v2.mint_wrap(&user, &period, &archetype, &data_hash, &signature_v1);
+    }));
+
+    assert!(
+        result.is_err(),
+        "A signature from V1 should not be replayable on V2"
+    );
+    assert!(client_v2.get_wrap(&user, &period).is_none());
 }
 
 #[test]
