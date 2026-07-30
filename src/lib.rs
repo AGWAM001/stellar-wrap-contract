@@ -14,10 +14,12 @@
 
 #![no_std]
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 extern crate std;
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol,
+};
 
 mod admin;
 mod alias;
@@ -25,10 +27,12 @@ mod errors;
 mod mint;
 mod queries;
 mod revoke;
-mod signature;
+pub mod signature;
+mod storage_accounting;
 mod storage_types;
 
 pub use errors::ContractError;
+pub use mint::CURRENT_PAYLOAD_VERSION;
 pub use storage_types::{ContractHealth, DataKey, WrapLifecycleFSM, WrapRecord, WrapState};
 
 #[contract]
@@ -44,8 +48,16 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+    pub fn pause(e: Env) {
+        admin::set_pause(e, true);
+    }
+
     pub fn unpause(e: Env) {
-        admin::unpause(e);
+        admin::set_pause(e, false);
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        admin::is_paused(&e)
     }
 
     /// Records that the storage migration `version` has been applied.
@@ -95,15 +107,18 @@ impl StellarWrapContract {
         payload_version: u32,
         signature: BytesN<64>,
     ) {
-        mint::mint_wrap(e, user, period, archetype, data_hash, payload_version, signature);
+        mint::mint_wrap(
+            e,
+            user,
+            period,
+            archetype,
+            data_hash,
+            payload_version,
+            signature,
+        );
     }
 
-    pub fn transition_wrap_state(
-        e: Env,
-        user: Address,
-        period: u64,
-        next_state: WrapState,
-    ) {
+    pub fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
         mint::transition_wrap_state(e, user, period, next_state);
     }
 
@@ -134,7 +149,12 @@ impl StellarWrapContract {
         queries::get_latest_wrap(e, user)
     }
 
-    pub fn get_wraps(e: Env, user: Address, start: u32, limit: u32) -> soroban_sdk::Vec<WrapRecord> {
+    pub fn get_wraps(
+        e: Env,
+        user: Address,
+        start: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<WrapRecord> {
         queries::get_wraps(e, user, start, limit)
     }
 
@@ -276,6 +296,26 @@ impl StellarWrapContract {
 
     pub fn total_revoked(e: Env) -> u64 {
         queries::total_revoked(e)
+    }
+
+    /// Returns estimated current persistent storage bytes used by the contract.
+    pub fn storage_bytes(e: Env) -> u64 {
+        storage_accounting::get_storage_bytes(&e)
+    }
+
+    /// Returns the computed current fee according to the on-chain params.
+    pub fn current_fee(e: Env) -> i128 {
+        storage_accounting::compute_current_fee(&e)
+    }
+
+    /// Admin: set fee params.
+    pub fn set_fee_params(e: Env, params: storage_types::FeeParams) {
+        storage_accounting::set_fee_params(&e, params);
+    }
+
+    /// View: fee params
+    pub fn fee_params(e: Env) -> storage_types::FeeParams {
+        storage_accounting::get_fee_params(&e)
     }
 }
 

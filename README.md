@@ -197,9 +197,20 @@ Successful wrap mints emit one event:
 
 ### Admin update event
 
-The `update_admin` function does **not** emit an event. To track admin changes, indexers should:
-- Query the `get_admin(e)` function periodically
-- Store the current admin address and detect changes across queries
+Successful admin rotations emit one event:
+
+- **Topic 0**: `admin` (`Symbol`)
+- **Topic 1**: `updated` (`Symbol`)
+- **Data**: `(old_admin, new_admin)` (`Address`, `Address`) — previous admin and newly assigned admin
+
+**Example values:**
+- Topic 0: `admin`
+- Topic 1: `updated`
+- Data: `(GOLDADMIN..., GNEWADMIN...)`
+
+**Properties relevant to indexers:**
+- The event is emitted only after the current admin authorizes the call and storage is updated
+- Indexers can track admin rotations without polling `get_admin(e)`, but should still verify the live admin via that query when enforcing privileged flows
 
 ### Revoke event
 
@@ -431,11 +442,42 @@ Run the test suite with:
 | Format check (CI) | `cargo fmt --check` or `make fmt-check` |
 | Lint | `cargo clippy -- -D warnings` or `make lint` |
 | Test | `cargo test` or `make test` |
+| Fuzz `mint_wrap` | `make fuzz FUZZ_SECONDS=30` |
 | Release build (WASM) | `cargo build --release --target wasm32-unknown-unknown` or `make build` |
 | Deploy to testnet | `make deploy-testnet` |
 | Docker reproducible build | `make docker-build` or `docker build -t stellar-wrap-contract .` |
 
 See the `Makefile` for the full list of targets (`make help`).
+
+### Fuzzing `mint_wrap`
+
+This repo ships a [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz) target that
+stresses `mint_wrap` with adversarial periods, hashes, and signatures
+(`fuzz/fuzz_targets/fuzz_mint_wrap.rs`).
+
+Prerequisites:
+
+```bash
+rustup install nightly
+rustup component add rust-src --toolchain nightly
+cargo install --locked cargo-fuzz
+```
+
+Build / run (ThreadSanitizer + `build-std` is required on macOS):
+
+```bash
+make fuzz-build
+make fuzz FUZZ_SECONDS=30
+# equivalent:
+cargo +nightly fuzz run --sanitizer=thread --build-std fuzz_mint_wrap -- -max_total_time=30
+```
+
+Invariants checked by the harness:
+
+- Invalid periods never persist a wrap or change balances
+- Rogue signatures never mint
+- A valid admin signature + valid period mints exactly once
+- Reminting the same `(user, period)` always fails without changing balance
 
 ### Troubleshooting
 
