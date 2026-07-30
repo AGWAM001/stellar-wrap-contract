@@ -53,5 +53,8 @@ pub enum ContractError {
     InvalidTimelockDelay = 43,
     TimelockRequired = 44,
     TimelockAlreadyEnabled = 45,
+    // Expiration errors
+    WrapNotExpired = 46,
+    InvalidExpirationDuration = 47,
 }
 

@@ -10,6 +10,7 @@ pub enum WrapState {
     Active = 3,
     Archived = 4,
     Cancelled = 5,
+    Expired = 6,
 }
 
 #[contracttype]
@@ -210,6 +211,8 @@ pub enum DataKey {
     Symbol,
     /// Emergency pause state flag.
     Paused,
+    /// Configurable expiration duration (in seconds) for unverified wraps.
+    ExpirationDuration,
     /// User-controlled opt-out flag. Present means the user has opted out of
     /// future mints; absent means minting is allowed.
     OptOut(Address),

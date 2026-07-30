@@ -10,6 +10,8 @@ const TTL_ONE_YEAR: u32 = 17_280 * 365;
 /// Used for non-critical data migrated from Instance to Temporary storage.
 pub(crate) const TTL_TEMP: u32 = 17_280;
 pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
+/// Default expiration duration for unverified wraps: 7 days in seconds.
+const DEFAULT_EXPIRATION_SECONDS: u64 = 7 * 24 * 60 * 60;
 pub const MAX_PERIOD_YEAR: u64 = 2100;
 
 fn validate_period(e: &Env, period: u64) {
@@ -333,5 +335,73 @@ pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_sta
     e.events().publish(
         (MintEventType::Transition.to_symbol(&e), user.clone(), period),
         MintEventData::Transition(user, period, next_state),
+    );
+}
+
+// ─── Expiration mechanism ────────────────────────────────────────────────
+
+/// Returns the configured expiration duration for unverified wraps.
+/// Defaults to 7 days (604,800 seconds) if not set by admin.
+pub(crate) fn get_expiration_duration(e: &Env) -> u64 {
+    e.storage()
+        .instance()
+        .get(&DataKey::ExpirationDuration)
+        .unwrap_or(DEFAULT_EXPIRATION_SECONDS)
+}
+
+/// Admin-only: sets the expiration duration (in seconds) for unverified wraps.
+/// Wraps in Draft or Pending state that remain unverified beyond this duration
+/// can be expired by anyone via [`expire_wrap`].
+pub(crate) fn set_expiration_duration(e: &Env, duration: u64) {
+    crate::admin::read_admin(e).require_auth();
+    if duration == 0 {
+        panic_with_error!(e, ContractError::InvalidExpirationDuration);
+    }
+    e.storage()
+        .instance()
+        .set(&DataKey::ExpirationDuration, &duration);
+}
+
+/// Expires an unverified wrap if its expiration deadline has passed.
+///
+/// A wrap can be expired if:
+/// - It is in `Draft` or `Pending` state (unverified).
+/// - The ledger timestamp exceeds `fsm.updated_at + expiration_duration`.
+///
+/// Callable by anyone — the function enforces objective time-based criteria.
+/// Wraps already in `Active`, `Archived`, `Cancelled`, or `Expired` state
+/// will cause the FSM transition to fail with [`ContractError::InvalidStateTransition`].
+///
+/// Expired wraps remain in persistent storage; no storage bytes are reclaimed.
+pub(crate) fn expire_wrap(e: Env, user: Address, period: u64) {
+    crate::admin::require_not_paused(&e);
+
+    let wrap_key = DataKey::Wrap(user.clone(), period);
+    let mut record: WrapRecord = e
+        .storage()
+        .persistent()
+        .get(&wrap_key)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::WrapNotFound));
+
+    let now = e.ledger().timestamp();
+    let duration = get_expiration_duration(&e);
+    let expires_at = record.fsm.updated_at.saturating_add(duration);
+
+    if now < expires_at {
+        panic_with_error!(e, ContractError::WrapNotExpired);
+    }
+
+    if !record.fsm.transition_to(WrapState::Expired, now) {
+        panic_with_error!(e, ContractError::InvalidStateTransition);
+    }
+
+    e.storage().persistent().set(&wrap_key, &record);
+    e.storage()
+        .persistent()
+        .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+    e.events().publish(
+        (symbol_short!("expire"), user, period),
+        symbol_short!("expired"),
     );
 }

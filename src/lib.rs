@@ -767,6 +767,8 @@ mod merkle_test;
 #[cfg(test)]
 mod oracle_test;
 #[cfg(test)]
+mod expiration_test;
+#[cfg(test)]
 mod security_test;
 #[cfg(test)]
 mod stake_test;
