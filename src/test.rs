@@ -361,6 +361,32 @@ fn test_update_admin_success() {
 }
 
 #[test]
+fn test_update_admin_by_current_admin_succeeds() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_admin",
+            args: (&new_admin,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    client.update_admin(&new_admin);
+    assert_eq!(client.get_admin().unwrap(), new_admin);
+}
+
+#[test]
 fn test_token_metadata() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
