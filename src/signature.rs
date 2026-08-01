@@ -1,3 +1,4 @@
+use ed25519_dalek::{Signature, VerifyingKey};
 use soroban_sdk::{contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol};
 
 use crate::ContractError;
@@ -51,11 +52,42 @@ pub fn construct_mint_payload(
     payload
 }
 
+/// Verifies an Ed25519 signature in-guest, mapping every failure mode to
+/// [`ContractError::InvalidSignature`].
+///
+/// The host `ed25519_verify` primitive cannot produce the contract error: on a
+/// bad signature it traps the VM with an uncatchable `Error(Crypto,
+/// InvalidInput)` host error (soroban-sdk `Crypto::ed25519_verify` discards the
+/// result, so the guest never regains control). Verifying here with the same
+/// pinned `ed25519-dalek` version (3.0.0, `verify_strict`) that
+/// `soroban-env-host` uses reproduces identical acceptance semantics while
+/// keeping the failure inside the contract's error domain.
+fn verify_ed25519(
+    public_key: &BytesN<32>,
+    message: &Bytes,
+    signature: &BytesN<64>,
+) -> Result<(), ContractError> {
+    let verifying_key = VerifyingKey::from_bytes(&public_key.to_array())
+        .map_err(|_| ContractError::InvalidSignature)?;
+    let sig = Signature::from_bytes(&signature.to_array());
+
+    let mut msg = [0u8; 512];
+    let len = message.len() as usize;
+    message.copy_into_slice(&mut msg[..len]);
+
+    verifying_key
+        .verify_strict(&msg[..len], &sig)
+        .map_err(|_| ContractError::InvalidSignature)
+}
+
 /// Verify an admin signature for a wrap mint request.
 ///
 /// The verification is performed over the canonical mint payload so the
 /// signature is bound to the current contract instance, the target user,
 /// the period, the archetype, and the data hash.
+///
+/// Every rejection — malformed key, tampered payload, wrong key, corrupted
+/// signature — surfaces as [`ContractError::InvalidSignature`].
 #[allow(clippy::too_many_arguments)]
 pub fn verify_mint_signature(
     e: &Env,
@@ -77,8 +109,7 @@ pub fn verify_mint_signature(
         data_hash,
         payload_version,
     );
-    e.crypto().ed25519_verify(admin_pubkey, &payload, signature);
-    Ok(())
+    verify_ed25519(admin_pubkey, &payload, signature)
 }
 
 /// Domain separator used for batch aggregated signatures.
@@ -106,6 +137,8 @@ pub fn construct_batch_mint_payload(
 }
 
 /// Verify an aggregated batch signature over a set of batch wrap items.
+///
+/// Any rejection surfaces as [`ContractError::InvalidSignature`].
 pub fn verify_batch_aggregated_signature(
     e: &Env,
     admin_pubkey: &BytesN<32>,
@@ -115,9 +148,7 @@ pub fn verify_batch_aggregated_signature(
     aggregated_signature: &BytesN<64>,
 ) -> Result<(), ContractError> {
     let payload = construct_batch_mint_payload(e, contract_id, items, payload_version);
-    e.crypto()
-        .ed25519_verify(admin_pubkey, &payload, aggregated_signature);
-    Ok(())
+    verify_ed25519(admin_pubkey, &payload, aggregated_signature)
 }
 
 #[cfg(test)]
