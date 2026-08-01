@@ -217,6 +217,44 @@ fn test_initialize_twice_fails() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #52)")]
+fn test_initialize_rejects_zero_admin_pubkey() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    // An all-zero Ed25519 public key has no known private key; accepting it
+    // would silently break every future mint, so initialization must reject it.
+    let zero_pubkey = BytesN::from_array(&env, &[0u8; 32]);
+    client.initialize(&admin, &zero_pubkey);
+}
+
+#[test]
+fn test_initialize_after_rejected_zero_pubkey_succeeds() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    // The rejected zero-key attempt must not leave the contract half-initialized.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.initialize(&admin, &BytesN::from_array(&env, &[0u8; 32]));
+    }));
+    assert!(result.is_err(), "zero admin pubkey must be rejected");
+    assert!(!client.health().initialized);
+
+    // A subsequent valid initialization still succeeds.
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    client.initialize(&admin, &admin_pubkey);
+    let health = client.health();
+    assert!(health.initialized);
+    assert!(health.has_admin);
+    assert!(health.has_signing_key);
+}
+
+#[test]
 fn test_health_reflects_initialization_state() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);

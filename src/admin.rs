@@ -11,9 +11,23 @@ pub(crate) fn read_admin(e: &Env) -> Address {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
 
+/// Initializes the contract with the controlling admin address and the
+/// Ed25519 public key used to verify mint signatures.
+///
+/// # Panics
+/// - [`ContractError::AlreadyInitialized`] if the contract was already initialized.
+/// - [`ContractError::InvalidAdminPubKey`] if `admin_pubkey` is the all-zero
+///   key. An all-zero Ed25519 public key has no known corresponding private
+///   key, so accepting it would silently brick every future `mint_wrap` call
+///   (no valid signature could ever be produced) while leaving the contract in
+///   an "initialized" state. Rejecting it at initialization time prevents this
+///   misconfiguration rather than discovering it after deployment.
 pub(crate) fn initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>) {
     if e.storage().instance().has(&DataKey::Admin) {
         panic_with_error!(e, ContractError::AlreadyInitialized);
+    }
+    if admin_pubkey == BytesN::from_array(&e, &[0u8; 32]) {
+        panic_with_error!(e, ContractError::InvalidAdminPubKey);
     }
     e.storage().instance().set(&DataKey::Admin, &admin);
     e.storage()

@@ -61,4 +61,6 @@ pub enum ContractError {
     InvalidTransfer = 49,
     TransferInProgress = 50,
     StorageInvariantViolation = 51,
+    /// The admin signing key provided to `initialize` is invalid (e.g. all-zero).
+    InvalidAdminPubKey = 52,
 }
