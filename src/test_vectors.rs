@@ -25,11 +25,7 @@ use super::*;
 use crate::mint::CURRENT_PAYLOAD_VERSION;
 use crate::signature::{construct_mint_payload, verify_mint_signature, MINT_DOMAIN_SEPARATOR};
 use ed25519_dalek::{Signer, SigningKey};
-use soroban_sdk::{
-    symbol_short,
-    testutils::Address as _,
-    Address, Bytes, BytesN, Env, Symbol,
-};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Bytes, BytesN, Env, Symbol};
 
 /// Fixed Ed25519 secret-key seed (tests only).
 pub const FIXTURE_SECRET_SEED: [u8; 32] = [0x42; 32];
@@ -42,9 +38,8 @@ pub const FIXTURE_PAYLOAD_VERSION: u32 = CURRENT_PAYLOAD_VERSION;
 
 /// Non-zero data hash fixture.
 pub const FIXTURE_DATA_HASH: [u8; 32] = [
-    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-    0x0f, 0x10,
+    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
 ];
 
 fn hex_encode(bytes: &[u8]) -> std::string::String {
@@ -92,8 +87,8 @@ fn test_deterministic_fixture_used_in_contract_mint() {
     let (env, contract_id, user, pubkey, signature, payload) = setup_fixture_env();
 
     let mut head = [0u8; 15];
-    for i in 0..15 {
-        head[i] = payload.get(i as u32).unwrap();
+    for (i, slot) in head.iter_mut().enumerate() {
+        *slot = payload.get(i as u32).unwrap();
     }
     assert_eq!(&head, MINT_DOMAIN_SEPARATOR);
 

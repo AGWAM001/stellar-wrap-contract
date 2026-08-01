@@ -2,7 +2,9 @@
 // in `scripts/merkle.ts`; not every one is called from a contract entrypoint.
 #![allow(dead_code)]
 
-use soroban_sdk::{panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    panic_with_error, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Symbol, Vec,
+};
 
 use crate::{ContractError, DataKey};
 
@@ -79,9 +81,7 @@ pub fn compute_whitelist_leaf(e: &Env, user: &Address) -> BytesN<32> {
 /// cheap write. Emits a `("whitelist", "root")` event for indexers.
 pub(crate) fn set_whitelist_root(e: Env, root: BytesN<32>) {
     crate::admin::read_admin(&e).require_auth();
-    e.storage()
-        .instance()
-        .set(&DataKey::WhitelistRoot, &root);
+    e.storage().instance().set(&DataKey::WhitelistRoot, &root);
     e.events()
         .publish((symbol_short!("whitelist"), symbol_short!("root")), root);
 }
@@ -101,8 +101,7 @@ pub(crate) fn get_whitelist_root(e: &Env) -> Option<BytesN<32>> {
 
 /// Read the whitelist root or panic with `MerkleRootNotSet`.
 fn read_whitelist_root(e: &Env) -> BytesN<32> {
-    get_whitelist_root(e)
-        .unwrap_or_else(|| panic_with_error!(e, ContractError::MerkleRootNotSet))
+    get_whitelist_root(e).unwrap_or_else(|| panic_with_error!(e, ContractError::MerkleRootNotSet))
 }
 
 /// Check whether `user` is a member of the published whitelist.

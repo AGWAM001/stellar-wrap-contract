@@ -1,7 +1,7 @@
 use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
 use crate::mint::TTL_TEMP;
-use crate::{ContractError, DataKey};
+use crate::{ContractError, DataKey, TransferFeeConfig};
 
 /// Reads the stored admin or panics with `NotInitialized`.
 pub(crate) fn read_admin(e: &Env) -> Address {
@@ -47,6 +47,27 @@ pub(crate) fn set_pause(e: Env, paused: bool) {
     read_admin(&e).require_auth();
     e.storage().instance().set(&DataKey::Paused, &paused);
     e.events().publish((symbol_short!("pause"),), paused);
+}
+
+/// Admin-only: configure the token-denominated fee charged by `transfer_wrap`.
+///
+/// An amount of zero enables fee-free transfers without removing the configured
+/// token and recipient.
+pub(crate) fn set_transfer_fee(e: Env, token: Address, recipient: Address, amount: i128) {
+    read_admin(&e).require_auth();
+    if amount < 0 {
+        panic_with_error!(e, ContractError::InvalidFeeParams);
+    }
+    e.storage().instance().set(
+        &DataKey::TransferFee,
+        &TransferFeeConfig {
+            amount,
+            recipient: recipient.clone(),
+            token: token.clone(),
+        },
+    );
+    e.events()
+        .publish((symbol_short!("fee"),), (token, recipient, amount));
 }
 
 pub(crate) fn is_paused(e: &Env) -> bool {
@@ -111,8 +132,10 @@ pub(crate) fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
         .set(&DataKey::ContractVersion, &next_version);
 
     // Emit audit event with the requested WASM hash and new version
-    e.events()
-        .publish((symbol_short!("upgrade"), next_version), new_wasm_hash.clone());
+    e.events().publish(
+        (symbol_short!("upgrade"), next_version),
+        new_wasm_hash.clone(),
+    );
 
     // Update the contract WASM with the provided hash
     e.deployer().update_current_contract_wasm(new_wasm_hash);

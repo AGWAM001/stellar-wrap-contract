@@ -114,7 +114,9 @@ pub(crate) fn execute_admin_proposal(e: Env, proposal_id: u64) {
 
     if proposal.votes_for > proposal.votes_against {
         proposal.status = ProposalStatus::Executed;
-        e.storage().instance().set(&DataKey::Admin, &proposal.proposed_admin);
+        e.storage()
+            .instance()
+            .set(&DataKey::Admin, &proposal.proposed_admin);
         e.storage().instance().remove(&DataKey::PendingAdmin);
 
         e.events().publish(
@@ -178,11 +180,7 @@ pub(crate) fn get_admin_proposal(e: &Env, proposal_id: u64) -> Option<AdminPropo
 }
 
 /// Query a voter's choice on a proposal.
-pub(crate) fn get_admin_proposal_vote(
-    e: &Env,
-    proposal_id: u64,
-    voter: Address,
-) -> Option<bool> {
+pub(crate) fn get_admin_proposal_vote(e: &Env, proposal_id: u64, voter: Address) -> Option<bool> {
     e.storage()
         .persistent()
         .get(&DataKey::AdminProposalVote(proposal_id, voter))

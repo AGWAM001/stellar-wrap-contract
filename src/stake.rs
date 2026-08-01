@@ -48,7 +48,9 @@ fn write_stake(e: &Env, user: &Address, record: &StakeRecord) {
 }
 
 fn remove_stake(e: &Env, user: &Address) {
-    e.storage().persistent().remove(&DataKey::Stake(user.clone()));
+    e.storage()
+        .persistent()
+        .remove(&DataKey::Stake(user.clone()));
 }
 
 fn read_total_staked(e: &Env) -> i128 {
@@ -107,8 +109,10 @@ pub(crate) fn stake(e: Env, user: Address, amount: i128) {
             .unwrap_or_else(|| panic_with_error!(e, ContractError::StakeArithmeticOverflow));
         write_total_staked(&e, new_total);
 
-        e.events()
-            .publish((symbol_short!("stake"), user.clone(), symbol_short!("add")), amount);
+        e.events().publish(
+            (symbol_short!("stake"), user.clone(), symbol_short!("add")),
+            amount,
+        );
     } else {
         let now = e.ledger().timestamp();
         let record = StakeRecord {
@@ -124,8 +128,10 @@ pub(crate) fn stake(e: Env, user: Address, amount: i128) {
             .unwrap_or_else(|| panic_with_error!(e, ContractError::StakeArithmeticOverflow));
         write_total_staked(&e, new_total);
 
-        e.events()
-            .publish((symbol_short!("stake"), user.clone(), symbol_short!("init")), amount);
+        e.events().publish(
+            (symbol_short!("stake"), user.clone(), symbol_short!("init")),
+            amount,
+        );
     }
 }
 
@@ -144,8 +150,8 @@ pub(crate) fn unstake(e: Env, user: Address) {
     crate::admin::require_not_paused(&e);
     user.require_auth();
 
-    let mut record = read_stake(&e, &user)
-        .unwrap_or_else(|| panic_with_error!(e, ContractError::StakeNotFound));
+    let mut record =
+        read_stake(&e, &user).unwrap_or_else(|| panic_with_error!(e, ContractError::StakeNotFound));
 
     if record.unstaking_at != 0 {
         panic_with_error!(e, ContractError::StakeCooldownActive);
@@ -175,8 +181,8 @@ pub(crate) fn withdraw_stake(e: Env, user: Address) {
     crate::admin::require_not_paused(&e);
     user.require_auth();
 
-    let record = read_stake(&e, &user)
-        .unwrap_or_else(|| panic_with_error!(e, ContractError::StakeNotFound));
+    let record =
+        read_stake(&e, &user).unwrap_or_else(|| panic_with_error!(e, ContractError::StakeNotFound));
 
     if record.unstaking_at == 0 {
         panic_with_error!(e, ContractError::StakeNotUnstaking);

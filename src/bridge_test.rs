@@ -5,14 +5,12 @@ extern crate std;
 use super::*;
 use crate::signature::construct_mint_payload;
 use ed25519_dalek::{Signer, SigningKey};
-use soroban_sdk::{
-    symbol_short,
-    testutils::Address as _,
-    Address, Bytes, BytesN, Env, Symbol,
-};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Bytes, BytesN, Env, Symbol};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-fn setup_test_env<'a>(env: &'a Env) -> (StellarWrapContractClient<'a>, Address, Address, SigningKey) {
+fn setup_test_env<'a>(
+    env: &'a Env,
+) -> (StellarWrapContractClient<'a>, Address, Address, SigningKey) {
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(env, &contract_id);
 
@@ -66,15 +64,15 @@ fn test_set_and_check_chain_status() {
     let chain_eth = 1u32;
     let chain_sol = 900u32;
 
-    assert!(!client.is_chain_supported(chain_eth));
-    assert!(!client.is_chain_supported(chain_sol));
+    assert!(!client.is_chain_supported(&chain_eth));
+    assert!(!client.is_chain_supported(&chain_sol));
 
     client.set_chain_status(&chain_eth, &true);
-    assert!(client.is_chain_supported(chain_eth));
-    assert!(!client.is_chain_supported(chain_sol));
+    assert!(client.is_chain_supported(&chain_eth));
+    assert!(!client.is_chain_supported(&chain_sol));
 
     client.set_chain_status(&chain_eth, &false);
-    assert!(!client.is_chain_supported(chain_eth));
+    assert!(!client.is_chain_supported(&chain_eth));
 }
 
 #[test]
@@ -83,7 +81,7 @@ fn test_invalid_chain_zero() {
     env.mock_all_auths();
 
     let (client, _admin, _relayer, _key) = setup_test_env(&env);
-    assert!(!client.is_chain_supported(0));
+    assert!(!client.is_chain_supported(&0));
 }
 
 #[test]
@@ -122,7 +120,9 @@ fn test_bridge_wrap_out_success() {
     assert_eq!(nonce, 1);
     assert_eq!(client.get_outbound_nonce(), 1);
 
-    let request = client.get_outbound_bridge_request(&nonce).expect("request exists");
+    let request = client
+        .get_outbound_bridge_request(&nonce)
+        .expect("request exists");
     assert_eq!(request.nonce, 1);
     assert_eq!(request.sender, user);
     assert_eq!(request.destination_chain, dest_chain);
@@ -186,7 +186,7 @@ fn test_bridge_wrap_in_success() {
     let data_hash = BytesN::from_array(&env, &[99u8; 32]);
     let source_nonce = 101u64;
 
-    assert!(!client.is_inbound_nonce_processed(source_chain, source_nonce));
+    assert!(!client.is_inbound_nonce_processed(&source_chain, &source_nonce));
     assert_eq!(client.balance_of(&recipient), 0);
 
     client.bridge_wrap_in(
@@ -198,7 +198,7 @@ fn test_bridge_wrap_in_success() {
         &data_hash,
     );
 
-    assert!(client.is_inbound_nonce_processed(source_chain, source_nonce));
+    assert!(client.is_inbound_nonce_processed(&source_chain, &source_nonce));
     assert_eq!(client.balance_of(&recipient), 1);
 
     let record = client
@@ -293,14 +293,7 @@ fn test_bridge_paused_blocks_operations() {
     assert!(out_result.is_err());
 
     let in_result = catch_unwind(AssertUnwindSafe(|| {
-        client.bridge_wrap_in(
-            &chain_id,
-            &500u64,
-            &user,
-            &period,
-            &archetype,
-            &data_hash,
-        );
+        client.bridge_wrap_in(&chain_id, &500u64, &user, &period, &archetype, &data_hash);
     }));
     assert!(in_result.is_err());
 }

@@ -33,8 +33,11 @@ impl WrapLifecycleFSM {
             (&self.state, next),
             (WrapState::Draft, WrapState::Pending)
                 | (WrapState::Draft, WrapState::Cancelled)
+                | (WrapState::Draft, WrapState::Expired)
                 | (WrapState::Pending, WrapState::Active)
                 | (WrapState::Pending, WrapState::Cancelled)
+                | (WrapState::Pending, WrapState::Expired)
+                | (WrapState::Active, WrapState::Pending)
                 | (WrapState::Active, WrapState::Archived)
                 | (WrapState::Active, WrapState::Cancelled)
         )
@@ -73,7 +76,6 @@ pub struct BatchWrapItem {
     pub payload_version: u32,
     pub signature: BytesN<64>,
 }
-
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -134,8 +136,6 @@ pub struct TimelockOperation {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutboundBridgeRequest {
     pub nonce: u64,
     pub sender: Address,
@@ -168,7 +168,6 @@ pub struct TransferFeeConfig {
     pub recipient: Address,
     /// Soroban token contract used to collect fees.
     pub token: Address,
-}
 }
 
 #[contracttype]
@@ -216,6 +215,11 @@ pub enum DataKey {
     /// User-controlled opt-out flag. Present means the user has opted out of
     /// future mints; absent means minting is allowed.
     OptOut(Address),
+    /// Stores the last ledger timestamp at which the user's registry state
+    /// changed via a successful mint or revoke (persistent, monotonic).
+    LastUpdated(Address),
+    /// Temporary mint reentrancy / double-call guard (temporary tier).
+    MintGuard(Address),
 
     // New instance storage keys for accounting / fee system:
     /// Estimated persistent storage bytes used by this contract (instance-level)
@@ -254,6 +258,13 @@ pub enum DataKey {
     AdminProposalVote(u64, Address),
     /// Tracks the contract version number, incremented on each `upgrade`.
     ContractVersion,
+    // Staking storage keys:
+    /// Individual stake record keyed by user (persistent).
+    Stake(Address),
+    /// Admin-configured staking parameters (instance-level).
+    StakeConfig,
+    /// Total amount staked across all users (instance-level).
+    TotalStaked,
 }
 
 #[contracttype]
@@ -276,4 +287,30 @@ pub struct AdminProposal {
     pub start_time: u64,
     pub end_time: u64,
     pub status: ProposalStatus,
+}
+
+/// Admin-configured staking parameters.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct StakeConfig {
+    /// Minimum amount a user must stake to earn fee priority.
+    pub min_stake: i128,
+    /// Seconds that must elapse between `unstake` and `withdraw_stake`.
+    pub cooldown_seconds: u64,
+    /// Basis points of discount earned per multiple of `min_stake`.
+    pub priority_multiplier_bps: u32,
+    /// Maximum discount (in basis points) a user can reach.
+    pub max_priority_bps: u32,
+}
+
+/// A user's staking record.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StakeRecord {
+    /// Total amount currently staked.
+    pub amount: i128,
+    /// Ledger timestamp of the initial stake.
+    pub staked_at: u64,
+    /// Ledger timestamp when `unstake` was called, or 0 if not unstaking.
+    pub unstaking_at: u64,
 }

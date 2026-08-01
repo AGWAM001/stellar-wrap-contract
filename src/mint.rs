@@ -1,4 +1,4 @@
-use soroban_sdk::{panic_with_error, Address, BytesN, Env, Symbol};
+use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env, Symbol};
 
 use crate::events::{MintEventData, MintEventType};
 use crate::storage_accounting;
@@ -36,6 +36,27 @@ fn get_admin_pubkey(e: &Env) -> BytesN<32> {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized))
 }
 
+/// Records the ledger timestamp at which the user's registry state last
+/// changed via a successful mint or revoke. The value is monotonic per user.
+///
+/// Storage bytes are accounted once, when the entry is first created; updates
+/// only overwrite the existing value and renew its TTL.
+pub(crate) fn update_last_updated(e: &Env, user: &Address) {
+    let now = e.ledger().timestamp();
+    let key = DataKey::LastUpdated(user.clone());
+    let was_missing = !e.storage().persistent().has(&key);
+    e.storage().persistent().set(&key, &now);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+    if was_missing {
+        storage_accounting::add_storage_bytes(
+            e,
+            storage_accounting::estimate_lastupdated_bytes_new(),
+        );
+    }
+}
+
 pub(crate) fn mint_wrap(
     e: Env,
     user: Address,
@@ -49,10 +70,7 @@ pub(crate) fn mint_wrap(
     user.require_auth();
 
     // Reject minting for users who have explicitly opted out.
-    if e.storage()
-        .persistent()
-        .has(&DataKey::OptOut(user.clone()))
-    {
+    if e.storage().persistent().has(&DataKey::OptOut(user.clone())) {
         panic_with_error!(e, ContractError::UserOptedOut);
     }
 
@@ -160,6 +178,30 @@ pub(crate) fn mint_wrap(
         );
     }
 
+    // WrapPeriods: transfer-index maintained alongside UserPeriods. A user that
+    // already has wraps but is missing this index is a legacy user that must be
+    // backfilled via `backfill_wrap_periods` before further mints are allowed.
+    let wrap_periods_key = DataKey::WrapPeriods(user.clone());
+    if !e.storage().persistent().has(&wrap_periods_key) && current_count > 0 {
+        panic_with_error!(e, ContractError::StorageInvariantViolation);
+    }
+    let mut wrap_periods: soroban_sdk::Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&wrap_periods_key)
+        .unwrap_or(soroban_sdk::Vec::new(&e));
+    if !wrap_periods.contains(period) {
+        wrap_periods.push_back(period);
+        e.storage()
+            .persistent()
+            .set(&wrap_periods_key, &wrap_periods);
+        e.storage()
+            .persistent()
+            .extend_ttl(&wrap_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+    }
+
+    update_last_updated(&e, &user);
+
     e.events().publish(
         (MintEventType::Mint.to_symbol(&e), user.clone(), period),
         MintEventData::Mint(user, period, archetype),
@@ -235,6 +277,8 @@ pub(crate) fn mint_wrap_batch(
             archetype: item.archetype.clone(),
             period: item.period,
             fsm: WrapLifecycleFSM::new(WrapState::Active, now),
+            description: None,
+            image_url: None,
         };
 
         e.storage().persistent().set(&wrap_key, &record);
@@ -242,10 +286,7 @@ pub(crate) fn mint_wrap_batch(
             .persistent()
             .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
-        storage_accounting::add_storage_bytes(
-            &e,
-            storage_accounting::estimate_wrap_bytes_new(),
-        );
+        storage_accounting::add_storage_bytes(&e, storage_accounting::estimate_wrap_bytes_new());
 
         let count_key = DataKey::WrapCount(item.user.clone());
         let current_count: u32 = e.storage().persistent().get(&count_key).unwrap_or(0);
@@ -306,8 +347,31 @@ pub(crate) fn mint_wrap_batch(
             );
         }
 
-        e.events()
-            .publish((symbol_short!("mint"), item.user, item.period), item.archetype);
+        let wrap_periods_key = DataKey::WrapPeriods(item.user.clone());
+        if !e.storage().persistent().has(&wrap_periods_key) && current_count > 0 {
+            panic_with_error!(&e, ContractError::StorageInvariantViolation);
+        }
+        let mut wrap_periods: soroban_sdk::Vec<u64> = e
+            .storage()
+            .persistent()
+            .get(&wrap_periods_key)
+            .unwrap_or(soroban_sdk::Vec::new(&e));
+        if !wrap_periods.contains(item.period) {
+            wrap_periods.push_back(item.period);
+            e.storage()
+                .persistent()
+                .set(&wrap_periods_key, &wrap_periods);
+            e.storage()
+                .persistent()
+                .extend_ttl(&wrap_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+        }
+
+        update_last_updated(&e, &item.user);
+
+        e.events().publish(
+            (symbol_short!("mint"), item.user, item.period),
+            item.archetype,
+        );
     }
 }
 
@@ -333,7 +397,11 @@ pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_sta
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     e.events().publish(
-        (MintEventType::Transition.to_symbol(&e), user.clone(), period),
+        (
+            MintEventType::Transition.to_symbol(&e),
+            user.clone(),
+            period,
+        ),
         MintEventData::Transition(user, period, next_state),
     );
 }
@@ -387,7 +455,7 @@ pub(crate) fn expire_wrap(e: Env, user: Address, period: u64) {
     let duration = get_expiration_duration(&e);
     let expires_at = record.fsm.updated_at.saturating_add(duration);
 
-    if now < expires_at {
+    if now <= expires_at {
         panic_with_error!(e, ContractError::WrapNotExpired);
     }
 

@@ -56,5 +56,9 @@ pub enum ContractError {
     // Expiration errors
     WrapNotExpired = 46,
     InvalidExpirationDuration = 47,
+    // Transfer errors
+    TransferFeeNotConfigured = 48,
+    InvalidTransfer = 49,
+    TransferInProgress = 50,
+    StorageInvariantViolation = 51,
 }
-
