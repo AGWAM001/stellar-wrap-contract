@@ -7,7 +7,10 @@ use crate::test_utils::{sign_payload, sign_payload_versioned};
 use ed25519_dalek::SigningKey;
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events},
+    testutils::{
+        budget::ContractCostType,
+        {Address as _, Events},
+    },
     Address, Bytes, BytesN, Env, IntoVal, String, Symbol, TryIntoVal,
 };
 use std::vec::Vec;
@@ -1994,6 +1997,75 @@ mod verify_data_unit_tests {
         // Verify the large payload matches
         let result = client.verify_data(&user, &period, &large_payload);
         assert!(result, "verify_data must correctly verify large payloads");
+    }
+
+    /// Covers issue #256: large off-chain JSON payloads should not surprise
+    /// budget usage or hash verification behavior.
+    #[test]
+    fn verify_data_succeeds_with_representative_large_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        // Build a representative off-chain JSON report (~200KB) made of many
+        // repeated records, mimicking a real analytics batch payload.
+        let mut large_bytes: Vec<u8> = Vec::new();
+        for i in 0..4000u64 {
+            let line = std::format!(
+                "{{\"record\":{},\"user\":\"u-{}\",\"status\":\"processed\",\"score\":99.5}}\n",
+                i,
+                i
+            );
+            large_bytes.extend_from_slice(line.as_bytes());
+        }
+        assert!(
+            large_bytes.len() > 100_000,
+            "payload must be a representative large size, got {}",
+            large_bytes.len()
+        );
+        let large_payload = Bytes::from_slice(&env, &large_bytes);
+
+        let data_hash_raw = env.crypto().sha256(&large_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+
+        let archetype = symbol_short!("large");
+        let period = 202501u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
+
+        // Reset the cost trackers so the budget below reflects only `verify_data`.
+        env.budget().reset_tracker();
+        let cpu_before = env.budget().cpu_instruction_cost();
+
+        let result = client.verify_data(&user, &period, &large_payload);
+
+        let cpu_after = env.budget().cpu_instruction_cost();
+        let sha_tracker = env.budget().tracker(ContractCostType::ComputeSha256Hash);
+
+        assert!(
+            result,
+            "verify_data must accept the exact large payload bytes"
+        );
+        assert!(
+            cpu_after > cpu_before,
+            "verify_data must consume cpu budget for a large payload ({} -> {})",
+            cpu_before,
+            cpu_after
+        );
+        assert!(
+            sha_tracker
+                .inputs
+                .is_some_and(|n| n >= large_bytes.len() as u64),
+            "sha256 must hash the full payload (inputs = {:?})",
+            sha_tracker.inputs
+        );
     }
 }
 
