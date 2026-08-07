@@ -5,15 +5,21 @@ extern crate std;
 use super::*;
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events},
-    Address, BytesN, Env,
+    testutils::{Address as _, Ledger},
+    Address, BytesN, Env, TryIntoVal,
 };
 
 // ── Stake tests ─────────────────────────────────────────────────────────────
 
+fn env_with_time() -> Env {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+    env
+}
+
 #[test]
 fn test_stake_basic_flow() {
-    let env = Env::default();
+    let env = env_with_time();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
@@ -61,7 +67,7 @@ fn test_stake_multiple_times_accumulates() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #15)")]
+#[should_panic(expected = "Error(Contract, #18)")]
 fn test_stake_below_minimum_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
@@ -80,7 +86,7 @@ fn test_stake_below_minimum_fails() {
 
 #[test]
 fn test_unstake_and_withdraw_flow() {
-    let env = Env::default();
+    let env = env_with_time();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
@@ -104,7 +110,7 @@ fn test_unstake_and_withdraw_flow() {
 
     // Advance time past cooldown (default 7 days = 604800 seconds)
     env.ledger().with_mut(|li| {
-        li.timestamp = li.timestamp + 604801;
+        li.timestamp += 604801;
     });
 
     // Withdraw
@@ -114,9 +120,9 @@ fn test_unstake_and_withdraw_flow() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #19)")]
+#[should_panic(expected = "Error(Contract, #22)")]
 fn test_withdraw_before_cooldown_fails() {
-    let env = Env::default();
+    let env = env_with_time();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
@@ -135,7 +141,7 @@ fn test_withdraw_before_cooldown_fails() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #16)")]
+#[should_panic(expected = "Error(Contract, #19)")]
 fn test_unstake_nonexistent_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
@@ -152,9 +158,9 @@ fn test_unstake_nonexistent_fails() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #17)")]
+#[should_panic(expected = "Error(Contract, #20)")]
 fn test_double_unstake_fails() {
-    let env = Env::default();
+    let env = env_with_time();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
@@ -244,9 +250,9 @@ fn test_admin_set_stake_config() {
 
     let new_config = StakeConfig {
         min_stake: 200,
-        cooldown_seconds: 3600, // 1 hour
-        priority_multiplier_bps: 500,  // 5% per min_stake unit
-        max_priority_bps: 3000, // 30% max
+        cooldown_seconds: 3600,       // 1 hour
+        priority_multiplier_bps: 500, // 5% per min_stake unit
+        max_priority_bps: 3000,       // 30% max
     };
     client.set_stake_config(&new_config);
 
@@ -258,7 +264,7 @@ fn test_admin_set_stake_config() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #20)")]
+#[should_panic(expected = "Error(Contract, #23)")]
 fn test_invalid_stake_config_zero_min_stake_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
@@ -280,7 +286,7 @@ fn test_invalid_stake_config_zero_min_stake_fails() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #20)")]
+#[should_panic(expected = "Error(Contract, #23)")]
 fn test_invalid_stake_config_max_bps_exceeds_10000_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
@@ -303,7 +309,7 @@ fn test_invalid_stake_config_max_bps_exceeds_10000_fails() {
 
 #[test]
 fn test_total_staked_multi_user() {
-    let env = Env::default();
+    let env = env_with_time();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
@@ -325,7 +331,7 @@ fn test_total_staked_multi_user() {
     // Unstake and withdraw one
     client.unstake(&user_b);
     env.ledger().with_mut(|li| {
-        li.timestamp = li.timestamp + 604801;
+        li.timestamp += 604801;
     });
     client.withdraw_stake(&user_b);
 
@@ -400,27 +406,29 @@ fn test_stake_events_emitted() {
 
     client.stake(&user, &500);
 
-    let events = env.events().all();
+    let events = crate::test_utils::decode_events(&env);
     // Find the stake event
-    let stake_events: Vec<_> = events
+    let stake_events: std::vec::Vec<_> = events
         .iter()
-        .filter(|e| {
-            let topics = &e.1;
+        .filter(|(topics, _)| {
             if topics.len() >= 2 {
-                let t0: Result<soroban_sdk::Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-                t0.map_or(false, |s| s == symbol_short!("stake"))
+                let t0: Result<soroban_sdk::Symbol, _> = topics[0].try_into_val(&env);
+                t0.is_ok_and(|s| s == symbol_short!("stake"))
             } else {
                 false
             }
         })
         .collect();
 
-    assert!(!stake_events.is_empty(), "Expected at least one stake event");
+    assert!(
+        !stake_events.is_empty(),
+        "Expected at least one stake event"
+    );
 }
 
 #[test]
 fn test_cannot_stake_during_unstaking() {
-    let env = Env::default();
+    let env = env_with_time();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
@@ -443,7 +451,7 @@ fn test_cannot_stake_during_unstaking() {
 
 #[test]
 fn test_re_stake_after_withdraw() {
-    let env = Env::default();
+    let env = env_with_time();
     let contract_id = env.register_contract(None, StellarWrapContract);
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
@@ -461,7 +469,7 @@ fn test_re_stake_after_withdraw() {
     // Unstake and withdraw
     client.unstake(&user);
     env.ledger().with_mut(|li| {
-        li.timestamp = li.timestamp + 604801;
+        li.timestamp += 604801;
     });
     client.withdraw_stake(&user);
     assert!(client.get_stake(&user).is_none());
@@ -474,7 +482,7 @@ fn test_re_stake_after_withdraw() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #18)")]
+#[should_panic(expected = "Error(Contract, #21)")]
 fn test_withdraw_without_unstake_fails() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);

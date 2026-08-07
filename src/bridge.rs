@@ -20,8 +20,12 @@ fn validate_period(e: &Env, period: u64) {
 pub(crate) fn set_bridge_relayer(e: &Env, relayer: Address) {
     let admin = crate::admin::read_admin(e);
     admin.require_auth();
-    e.storage().instance().set(&DataKey::BridgeRelayer, &relayer);
-    e.storage().instance().extend_ttl(TTL_ONE_YEAR, TTL_ONE_YEAR);
+    e.storage()
+        .instance()
+        .set(&DataKey::BridgeRelayer, &relayer);
+    e.storage()
+        .instance()
+        .extend_ttl(TTL_ONE_YEAR, TTL_ONE_YEAR);
 }
 
 /// Returns the configured bridge relayer address, or None if not set.
@@ -38,7 +42,9 @@ pub(crate) fn set_chain_status(e: &Env, chain_id: u32, enabled: bool) {
     }
     let key = DataKey::BridgeChainStatus(chain_id);
     e.storage().instance().set(&key, &enabled);
-    e.storage().instance().extend_ttl(TTL_ONE_YEAR, TTL_ONE_YEAR);
+    e.storage()
+        .instance()
+        .extend_ttl(TTL_ONE_YEAR, TTL_ONE_YEAR);
 }
 
 /// Returns whether a target/source chain ID is supported/enabled.
@@ -91,7 +97,9 @@ pub(crate) fn bridge_wrap_out(
     let current_nonce: u64 = e.storage().instance().get(&nonce_key).unwrap_or(0);
     let next_nonce = current_nonce + 1;
     e.storage().instance().set(&nonce_key, &next_nonce);
-    e.storage().instance().extend_ttl(TTL_ONE_YEAR, TTL_ONE_YEAR);
+    e.storage()
+        .instance()
+        .extend_ttl(TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     let outbound_req = OutboundBridgeRequest {
         nonce: next_nonce,
@@ -169,6 +177,8 @@ pub(crate) fn bridge_wrap_in(
             archetype: archetype.clone(),
             period,
             fsm: WrapLifecycleFSM::new(WrapState::Active, now),
+            description: None,
+            image_url: None,
         };
 
         e.storage().persistent().set(&wrap_key, &record);
@@ -176,10 +186,7 @@ pub(crate) fn bridge_wrap_in(
             .persistent()
             .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
-        storage_accounting::add_storage_bytes(
-            &e,
-            storage_accounting::estimate_wrap_bytes_new(),
-        );
+        storage_accounting::add_storage_bytes(&e, storage_accounting::estimate_wrap_bytes_new());
 
         let count_key = DataKey::WrapCount(recipient.clone());
         let current_count: u32 = e.storage().persistent().get(&count_key).unwrap_or(0);
@@ -268,10 +275,7 @@ pub(crate) fn bridge_wrap_in(
     );
 }
 
-pub(crate) fn get_outbound_bridge_request(
-    e: &Env,
-    nonce: u64,
-) -> Option<OutboundBridgeRequest> {
+pub(crate) fn get_outbound_bridge_request(e: &Env, nonce: u64) -> Option<OutboundBridgeRequest> {
     let key = DataKey::OutboundBridgeRequest(nonce);
     e.storage().persistent().get(&key)
 }
@@ -285,11 +289,7 @@ pub(crate) fn get_inbound_bridge_record(
     e.storage().persistent().get(&key)
 }
 
-pub(crate) fn is_inbound_nonce_processed(
-    e: &Env,
-    source_chain: u32,
-    source_nonce: u64,
-) -> bool {
+pub(crate) fn is_inbound_nonce_processed(e: &Env, source_chain: u32, source_nonce: u64) -> bool {
     let key = DataKey::InboundBridgeProcessed(source_chain, source_nonce);
     e.storage().persistent().get(&key).unwrap_or(false)
 }

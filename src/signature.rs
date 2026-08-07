@@ -37,7 +37,7 @@ pub fn construct_mint_payload(
 ) -> Bytes {
     let mut payload = Bytes::new(e);
     payload.append(&Bytes::from_array(e, MINT_DOMAIN_SEPARATOR));
-    
+
     let typed_payload = MintPayload {
         archetype: archetype.clone(),
         contract_id: contract_id.clone(),
@@ -46,7 +46,7 @@ pub fn construct_mint_payload(
         period,
         user: user.clone(),
     };
-    
+
     payload.append(&typed_payload.to_xdr(e));
     payload
 }
@@ -95,7 +95,7 @@ pub fn construct_batch_mint_payload(
     payload.append(&Bytes::from_array(e, BATCH_MINT_DOMAIN_SEPARATOR));
     payload.append(&payload_version.to_xdr(e));
     payload.append(&contract_id.to_xdr(e));
-    payload.append(&(items.len() as u32).to_xdr(e));
+    payload.append(&items.len().to_xdr(e));
     for item in items.iter() {
         payload.append(&item.user.to_xdr(e));
         payload.append(&item.period.to_xdr(e));
@@ -115,10 +115,10 @@ pub fn verify_batch_aggregated_signature(
     aggregated_signature: &BytesN<64>,
 ) -> Result<(), ContractError> {
     let payload = construct_batch_mint_payload(e, contract_id, items, payload_version);
-    e.crypto().ed25519_verify(admin_pubkey, &payload, aggregated_signature);
+    e.crypto()
+        .ed25519_verify(admin_pubkey, &payload, aggregated_signature);
     Ok(())
 }
-
 
 #[cfg(test)]
 #[allow(deprecated)]
@@ -132,6 +132,7 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use crate::StellarWrapContract;
+    use crate::StellarWrapContractClient;
 
     fn sign_payload(
         env: &Env,
@@ -175,7 +176,7 @@ mod tests {
 
         let mut expected = Bytes::new(&env);
         expected.append(&Bytes::from_array(&env, MINT_DOMAIN_SEPARATOR));
-        
+
         let typed_payload = MintPayload {
             archetype: archetype.clone(),
             contract_id: contract_id.clone(),
@@ -317,14 +318,7 @@ mod tests {
         let invalid_sig = BytesN::from_array(&env, &[0u8; 64]);
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            client.mint_wrap(
-                &user,
-                &period,
-                &archetype,
-                &data_hash,
-                &1u32,
-                &invalid_sig,
-            );
+            client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &invalid_sig);
         }));
 
         assert!(result.is_err());
@@ -383,6 +377,4 @@ mod tests {
         )
         .is_ok());
     }
-
->>>>>>> main
 }

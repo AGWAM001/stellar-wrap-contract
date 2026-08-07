@@ -3,12 +3,15 @@
 extern crate std;
 
 use super::*;
-use crate::test_utils::sign_payload;
+use crate::test_utils::{sign_payload, sign_payload_versioned};
 use ed25519_dalek::SigningKey;
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events},
-    Address, Bytes, BytesN, Env, String, Symbol, TryIntoVal,
+    testutils::{
+        budget::ContractCostType,
+        {Address as _, Events},
+    },
+    Address, Bytes, BytesN, Env, IntoVal, String, Symbol, TryIntoVal,
 };
 use std::vec::Vec;
 
@@ -76,18 +79,16 @@ fn test_mint_emits_event() {
 
     client.mint_wrap(&user, &period, &archetype, &hash, &1u32, &signature);
 
-    let events = env.events().all();
-    let last_event = events.last().expect("no events found");
-    let (_, topics, data) = last_event;
+    let events = crate::test_utils::decode_events(&env);
+    let (topics, data) = events.last().expect("no events found");
 
-    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-    let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
-    let event_archetype: Symbol = data.try_into_val(&env).unwrap();
-
-    assert_eq!(event_topic, symbol_short!("mint"));
-    assert_eq!(event_user, user);
-    assert_eq!(event_period, period);
+    let _event_topic: Symbol = topics[0].try_into_val(&env).unwrap();
+    let _event_user: Address = topics[1].try_into_val(&env).unwrap();
+    let _event_period: u64 = topics[2].try_into_val(&env).unwrap();
+    let (event_topic_data, event_user_data, _, event_archetype): (Symbol, Address, u64, Symbol) =
+        data.try_into_val(&env).unwrap();
+    assert_eq!(event_topic_data, Symbol::new(&env, "Mint"));
+    assert_eq!(event_user_data, user);
     assert_eq!(event_archetype, archetype);
 }
 
@@ -135,35 +136,32 @@ fn test_revoke_emits_event_multi_user() {
     client.mint_wrap(&user_b, &period_b, &archetype_b, &hash, &1u32, &sig_b);
     let reason = BytesN::from_array(&env, &[0u8; 32]);
     client.revoke_wrap(&user_a, &period_a, &reason);
+
+    // Each top-level invocation resets the event buffer in SDK 27, so capture
+    // the event right after each revoke.
+    let assert_revoke =
+        |_client: &StellarWrapContractClient, env: &Env, user: &Address, period: u64| {
+            let events = crate::test_utils::decode_events(env);
+            let revoke_events: Vec<_> = events
+                .iter()
+                .filter(|(topics, _)| {
+                    let sym: Symbol = topics[0].try_into_val(env).unwrap();
+                    sym == symbol_short!("revoke")
+                })
+                .collect();
+            assert_eq!(revoke_events.len(), 1);
+            let (topics, data) = &revoke_events[0];
+            let event_user: Address = topics[1].try_into_val(env).unwrap();
+            let event_period: u64 = topics[2].try_into_val(env).unwrap();
+            let event_reason: BytesN<32> = data.clone().try_into_val(env).unwrap();
+            assert_eq!(event_user, *user);
+            assert_eq!(event_period, period);
+            assert_eq!(event_reason, reason);
+        };
+
+    assert_revoke(&client, &env, &user_a, period_a);
     client.revoke_wrap(&user_b, &period_b, &reason);
-
-    let events = env.events().all();
-
-    let revoke_events: Vec<_> = events
-        .iter()
-        .filter(|(_, topics, _)| {
-            let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-            sym == symbol_short!("revoke")
-        })
-        .collect();
-
-    assert_eq!(revoke_events.len(), 2);
-
-    let (_, topics_a, data_a) = &revoke_events[0];
-    let event_user_a: Address = topics_a.get(1).unwrap().try_into_val(&env).unwrap();
-    let event_period_a: u64 = topics_a.get(2).unwrap().try_into_val(&env).unwrap();
-    let event_archetype_a: Symbol = data_a.clone().try_into_val(&env).unwrap();
-    assert_eq!(event_user_a, user_a);
-    assert_eq!(event_period_a, period_a);
-    assert_eq!(event_archetype_a, archetype_a);
-
-    let (_, topics_b, data_b) = &revoke_events[1];
-    let event_user_b: Address = topics_b.get(1).unwrap().try_into_val(&env).unwrap();
-    let event_period_b: u64 = topics_b.get(2).unwrap().try_into_val(&env).unwrap();
-    let event_archetype_b: Symbol = data_b.clone().try_into_val(&env).unwrap();
-    assert_eq!(event_user_b, user_b);
-    assert_eq!(event_period_b, period_b);
-    assert_eq!(event_archetype_b, archetype_b);
+    assert_revoke(&client, &env, &user_b, period_b);
 }
 
 #[test]
@@ -222,6 +220,44 @@ fn test_initialize_twice_fails() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #52)")]
+fn test_initialize_rejects_zero_admin_pubkey() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    // An all-zero Ed25519 public key has no known private key; accepting it
+    // would silently break every future mint, so initialization must reject it.
+    let zero_pubkey = BytesN::from_array(&env, &[0u8; 32]);
+    client.initialize(&admin, &zero_pubkey);
+}
+
+#[test]
+fn test_initialize_after_rejected_zero_pubkey_succeeds() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    // The rejected zero-key attempt must not leave the contract half-initialized.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.initialize(&admin, &BytesN::from_array(&env, &[0u8; 32]));
+    }));
+    assert!(result.is_err(), "zero admin pubkey must be rejected");
+    assert!(!client.health().initialized);
+
+    // A subsequent valid initialization still succeeds.
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    client.initialize(&admin, &admin_pubkey);
+    let health = client.health();
+    assert!(health.initialized);
+    assert!(health.has_admin);
+    assert!(health.has_signing_key);
+}
+
+#[test]
 fn test_health_reflects_initialization_state() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
@@ -229,9 +265,9 @@ fn test_health_reflects_initialization_state() {
 
     // Before initialization: nothing configured.
     let health = client.health();
-    assert_eq!(health.initialized, false);
-    assert_eq!(health.has_admin, false);
-    assert_eq!(health.has_signing_key, false);
+    assert!(!health.initialized);
+    assert!(!health.has_admin);
+    assert!(!health.has_signing_key);
 
     // Initialize the contract.
     let signing_key = SigningKey::from_bytes(&[1u8; 32]);
@@ -241,9 +277,9 @@ fn test_health_reflects_initialization_state() {
 
     // After initialization: everything configured.
     let health = client.health();
-    assert_eq!(health.initialized, true);
-    assert_eq!(health.has_admin, true);
-    assert_eq!(health.has_signing_key, true);
+    assert!(health.initialized);
+    assert!(health.has_admin);
+    assert!(health.has_signing_key);
 }
 
 #[test]
@@ -474,7 +510,7 @@ fn test_get_wrap_existing_user_nonexistent_period() {
     let hash = BytesN::from_array(&env, &[42u8; 32]);
     let period = 202401u64;
 
-    let signature = sign_payload(
+    let signature = sign_payload_versioned(
         &env,
         &signing_key,
         &contract_id,
@@ -843,7 +879,7 @@ fn test_non_monotonic_period_mints_across_users() {
             &archetype,
             &hash,
         );
-        client.mint_wrap(user, &period, &archetype, &hash, &sig);
+        client.mint_wrap(user, &period, &archetype, &hash, &1u32, &sig);
     };
 
     // Interleaved, non-monotonic ordering across both users:
@@ -1048,7 +1084,7 @@ fn test_burn_wrap_removes_wrap_from_storage() {
     );
 
     // Mint a wrap
-    client.mint_wrap(&user, &period, &archetype, &hash, &signature);
+    client.mint_wrap(&user, &period, &archetype, &hash, &1u32, &signature);
     assert!(client.get_wrap(&user, &period).is_some());
 
     // Burn the wrap
@@ -1097,8 +1133,8 @@ fn test_burn_wrap_decrements_count() {
     );
 
     // Mint two wraps
-    client.mint_wrap(&user, &period1, &archetype, &hash, &sig1);
-    client.mint_wrap(&user, &period2, &archetype, &hash, &sig2);
+    client.mint_wrap(&user, &period1, &archetype, &hash, &1u32, &sig1);
+    client.mint_wrap(&user, &period2, &archetype, &hash, &1u32, &sig2);
     assert_eq!(client.balance_of(&user), 2);
 
     // Burn one wrap
@@ -1112,7 +1148,7 @@ fn test_burn_wrap_decrements_count() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #3)")]
+#[should_panic(expected = "Error(Contract, #9)")]
 fn test_burn_wrap_requires_owner_auth() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
@@ -1142,7 +1178,7 @@ fn test_burn_wrap_requires_owner_auth() {
     );
 
     // User A mints a wrap
-    client.mint_wrap(&user_a, &period, &archetype, &hash, &sig);
+    client.mint_wrap(&user_a, &period, &archetype, &hash, &1u32, &sig);
 
     // User B tries to burn User A's wrap — should fail
     client.burn_wrap(&user_b, &period);
@@ -1193,7 +1229,7 @@ fn test_burn_wrap_emits_burn_event() {
         &hash,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &hash, &1u32, &sig);
 
     // Clear events from mint
     env.events().all();
@@ -1202,13 +1238,12 @@ fn test_burn_wrap_emits_burn_event() {
     client.burn_wrap(&user, &period);
 
     // Check the burn event
-    let events = env.events().all();
-    let last_event = events.last().expect("no events found");
-    let (_, topics, data) = last_event;
+    let events = crate::test_utils::decode_events(&env);
+    let (topics, data) = events.last().expect("no events found");
 
-    let event_topic: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-    let event_user: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    let event_period: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
+    let event_topic: Symbol = topics[0].try_into_val(&env).unwrap();
+    let event_user: Address = topics[1].try_into_val(&env).unwrap();
+    let event_period: u64 = topics[2].try_into_val(&env).unwrap();
     let event_owner: Address = data.try_into_val(&env).unwrap();
 
     assert_eq!(event_topic, symbol_short!("burn"));
@@ -1245,7 +1280,7 @@ fn test_burn_wrap_owner_cannot_access_after() {
         &hash,
     );
 
-    client.mint_wrap(&user, &period, &archetype, &hash, &sig);
+    client.mint_wrap(&user, &period, &archetype, &hash, &1u32, &sig);
     let record_before = client.get_wrap(&user, &period).unwrap();
     assert_eq!(record_before.data_hash, hash);
 
@@ -1299,8 +1334,8 @@ fn test_burn_wrap_only_deletes_target() {
     );
 
     // Mint two wraps
-    client.mint_wrap(&user, &period_a, &archetype, &hash, &sig_a);
-    client.mint_wrap(&user, &period_b, &archetype, &hash, &sig_b);
+    client.mint_wrap(&user, &period_a, &archetype, &hash, &1u32, &sig_a);
+    client.mint_wrap(&user, &period_b, &archetype, &hash, &1u32, &sig_b);
 
     // Burn wrap A
     client.burn_wrap(&user, &period_a);
@@ -1350,8 +1385,8 @@ fn test_burn_wrap_clears_latest_period() {
         &hash,
     );
 
-    client.mint_wrap(&user, &period1, &archetype, &hash, &sig1);
-    client.mint_wrap(&user, &period2, &archetype, &hash, &sig2);
+    client.mint_wrap(&user, &period1, &archetype, &hash, &1u32, &sig1);
+    client.mint_wrap(&user, &period2, &archetype, &hash, &1u32, &sig2);
 
     // Latest wrap should be period2
     let latest_before = client.get_latest_wrap(&user).unwrap();
@@ -1404,8 +1439,8 @@ fn test_burn_wrap_multiple_users_independent() {
     );
 
     // Both users mint for the same period
-    client.mint_wrap(&user_a, &period, &archetype, &hash, &sig_a);
-    client.mint_wrap(&user_b, &period, &archetype, &hash, &sig_b);
+    client.mint_wrap(&user_a, &period, &archetype, &hash, &1u32, &sig_a);
+    client.mint_wrap(&user_b, &period, &archetype, &hash, &1u32, &sig_b);
 
     // Burn user A's wrap
     client.burn_wrap(&user_a, &period);
@@ -1441,13 +1476,31 @@ fn test_get_all_wraps_for_user_returns_all_wraps() {
     let hash3 = BytesN::from_array(&env, &[30u8; 32]);
 
     let sig1 = sign_payload(
-        &env, &signing_key, &contract_id, &user, 202401, &archetype, &hash1,
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202401,
+        &archetype,
+        &hash1,
     );
     let sig2 = sign_payload(
-        &env, &signing_key, &contract_id, &user, 202402, &archetype, &hash2,
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202402,
+        &archetype,
+        &hash2,
     );
     let sig3 = sign_payload(
-        &env, &signing_key, &contract_id, &user, 202403, &archetype, &hash3,
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        202403,
+        &archetype,
+        &hash3,
     );
 
     client.mint_wrap(&user, &202401, &archetype, &hash1, &1u32, &sig1);
@@ -1497,7 +1550,13 @@ fn test_get_all_wraps_for_user_single_wrap() {
     let period = 202401u64;
 
     let sig = sign_payload(
-        &env, &signing_key, &contract_id, &user, period, &archetype, &hash,
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &hash,
     );
     client.mint_wrap(&user, &period, &archetype, &hash, &1u32, &sig);
 
@@ -1528,13 +1587,31 @@ fn test_get_all_wraps_for_user_independent_per_user() {
     let hash = BytesN::from_array(&env, &[42u8; 32]);
 
     let sig_a1 = sign_payload(
-        &env, &signing_key, &contract_id, &user_a, 202401, &archetype, &hash,
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_a,
+        202401,
+        &archetype,
+        &hash,
     );
     let sig_a2 = sign_payload(
-        &env, &signing_key, &contract_id, &user_a, 202402, &archetype, &hash,
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_a,
+        202402,
+        &archetype,
+        &hash,
     );
     let sig_b1 = sign_payload(
-        &env, &signing_key, &contract_id, &user_b, 202401, &archetype, &hash,
+        &env,
+        &signing_key,
+        &contract_id,
+        &user_b,
+        202401,
+        &archetype,
+        &hash,
     );
 
     client.mint_wrap(&user_a, &202401, &archetype, &hash, &1u32, &sig_a1);
@@ -1553,10 +1630,18 @@ fn test_get_all_wraps_for_user_independent_per_user() {
 /// that match the hash stored during minting.
 mod verify_data_unit_tests {
     use super::*;
+    use std::vec;
 
     /// Helper function to set up a standard test environment
     /// Returns: (Env, contract_id, client, signing_key, admin, user)
-    fn setup_env() -> (Env, Address, StellarWrapContractClient, SigningKey, Address, Address) {
+    fn setup_env() -> (
+        Env,
+        Address,
+        StellarWrapContractClient<'static>,
+        SigningKey,
+        Address,
+        Address,
+    ) {
         let env = Env::default();
         let contract_id = env.register_contract(None, StellarWrapContract);
         let client = StellarWrapContractClient::new(&env, &contract_id);
@@ -1580,12 +1665,15 @@ mod verify_data_unit_tests {
         let (env, contract_id, client, signing_key, _admin, user) = setup_env();
 
         // Build a correct payload matching JSON data
-        let correct_payload = Bytes::from_slice(&env, b"{\"user_id\":123,\"status\":\"active\",\"level\":10}");
-        
+        let correct_payload = Bytes::from_slice(
+            &env,
+            b"{\"user_id\":123,\"status\":\"active\",\"level\":10}",
+        );
+
         // Compute the hash that will be stored in the wrap record
         let data_hash_raw = env.crypto().sha256(&correct_payload);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("gold");
         let period = 202401u64;
 
@@ -1599,11 +1687,14 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Verify that passing the exact same correct payload returns true
         let result = client.verify_data(&user, &period, &correct_payload);
-        assert!(result, "verify_data must return true for the correct payload that matches the stored hash");
+        assert!(
+            result,
+            "verify_data must return true for the correct payload that matches the stored hash"
+        );
     }
 
     /// Verifies that verify_data handles complex JSON payloads correctly
@@ -1617,10 +1708,10 @@ mod verify_data_unit_tests {
             &env,
             b"{\"profile\":{\"name\":\"Alice\",\"age\":30},\"scores\":[100,95,87],\"metadata\":{\"created\":\"2024-01-15\",\"verified\":true}}"
         );
-        
+
         let data_hash_raw = env.crypto().sha256(&complex_payload);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("standard");
         let period = 202402u64;
 
@@ -1633,11 +1724,14 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Verify the exact same complex payload succeeds
         let result = client.verify_data(&user, &period, &complex_payload);
-        assert!(result, "verify_data must correctly verify complex JSON payloads");
+        assert!(
+            result,
+            "verify_data must correctly verify complex JSON payloads"
+        );
     }
 
     /// Verifies that verify_data rejects a payload with modified content
@@ -1646,10 +1740,10 @@ mod verify_data_unit_tests {
         let (env, contract_id, client, signing_key, _admin, user) = setup_env();
 
         let original_payload = Bytes::from_slice(&env, b"{\"score\":100,\"rank\":\"gold\"}");
-        
+
         let data_hash_raw = env.crypto().sha256(&original_payload);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("verify");
         let period = 202403u64;
 
@@ -1662,13 +1756,16 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Try to verify with a tampered/different payload
         let incorrect_payload = Bytes::from_slice(&env, b"{\"score\":999,\"rank\":\"platinum\"}");
         let result = client.verify_data(&user, &period, &incorrect_payload);
-        
-        assert!(!result, "verify_data must return false for incorrect/tampered payload");
+
+        assert!(
+            !result,
+            "verify_data must return false for incorrect/tampered payload"
+        );
     }
 
     /// Verifies that verify_data handles empty/minimal payloads correctly
@@ -1678,10 +1775,10 @@ mod verify_data_unit_tests {
 
         // Create a minimal empty JSON object payload
         let minimal_payload = Bytes::from_slice(&env, b"{}");
-        
+
         let data_hash_raw = env.crypto().sha256(&minimal_payload);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("minimal");
         let period = 202404u64;
 
@@ -1694,11 +1791,14 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Verify that the minimal payload works correctly
         let result = client.verify_data(&user, &period, &minimal_payload);
-        assert!(result, "verify_data must correctly handle minimal/empty payloads");
+        assert!(
+            result,
+            "verify_data must correctly handle minimal/empty payloads"
+        );
     }
 
     /// Verifies that verify_data is deterministic —
@@ -1709,10 +1809,10 @@ mod verify_data_unit_tests {
         let (env, contract_id, client, signing_key, _admin, user) = setup_env();
 
         let payload = Bytes::from_slice(&env, b"{\"deterministic\":true,\"value\":42}");
-        
+
         let data_hash_raw = env.crypto().sha256(&payload);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("determ");
         let period = 202405u64;
 
@@ -1725,7 +1825,7 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Call verify_data multiple times with the same payload
         let result1 = client.verify_data(&user, &period, &payload);
@@ -1739,7 +1839,7 @@ mod verify_data_unit_tests {
         assert_eq!(result2, result3, "verify_data must be deterministic");
     }
 
-    /// Verifies that verify_data correctly distinguishes between 
+    /// Verifies that verify_data correctly distinguishes between
     /// different correct payloads for different periods
     #[test]
     fn verify_data_distinguishes_different_periods() {
@@ -1747,13 +1847,13 @@ mod verify_data_unit_tests {
 
         let payload1 = Bytes::from_slice(&env, b"{\"period\":1,\"data\":\"first\"}");
         let payload2 = Bytes::from_slice(&env, b"{\"period\":2,\"data\":\"second\"}");
-        
+
         let hash1_raw = env.crypto().sha256(&payload1);
         let hash1 = BytesN::from_array(&env, &hash1_raw.to_array());
-        
+
         let hash2_raw = env.crypto().sha256(&payload2);
         let hash2 = BytesN::from_array(&env, &hash2_raw.to_array());
-        
+
         let archetype = symbol_short!("multi");
         let period1 = 202406u64;
         let period2 = 202407u64;
@@ -1777,8 +1877,8 @@ mod verify_data_unit_tests {
             &hash2,
         );
 
-        client.mint_wrap(&user, &period1, &archetype, &hash1, &sig1);
-        client.mint_wrap(&user, &period2, &archetype, &hash2, &sig2);
+        client.mint_wrap(&user, &period1, &archetype, &hash1, &1u32, &sig1);
+        client.mint_wrap(&user, &period2, &archetype, &hash2, &1u32, &sig2);
 
         // Verify correct payload for each period
         assert!(
@@ -1808,10 +1908,10 @@ mod verify_data_unit_tests {
 
         // Create binary payload with non-UTF8 bytes
         let binary_payload = Bytes::from_slice(&env, b"\x00\x01\x02\xFF\xFE\xFD");
-        
+
         let data_hash_raw = env.crypto().sha256(&binary_payload);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("binary");
         let period = 202408u64;
 
@@ -1824,7 +1924,7 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Verify that the exact binary payload matches
         let result = client.verify_data(&user, &period, &binary_payload);
@@ -1837,10 +1937,10 @@ mod verify_data_unit_tests {
         let (env, contract_id, client, signing_key, _admin, user) = setup_env();
 
         let original_binary = Bytes::from_slice(&env, b"\x00\x01\x02\x03\x04");
-        
+
         let data_hash_raw = env.crypto().sha256(&original_binary);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("bitdiff");
         let period = 202409u64;
 
@@ -1853,13 +1953,16 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Try with one byte changed (0x02 -> 0x03 at index 2)
         let tampered_binary = Bytes::from_slice(&env, b"\x00\x01\x03\x03\x04");
         let result = client.verify_data(&user, &period, &tampered_binary);
-        
-        assert!(!result, "verify_data must reject payload with even a single byte changed");
+
+        assert!(
+            !result,
+            "verify_data must reject payload with even a single byte changed"
+        );
     }
 
     /// Verifies that verify_data handles very large payloads correctly
@@ -1873,10 +1976,10 @@ mod verify_data_unit_tests {
             *byte = (i % 256) as u8;
         }
         let large_payload = Bytes::from_slice(&env, &large_bytes);
-        
+
         let data_hash_raw = env.crypto().sha256(&large_payload);
         let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
-        
+
         let archetype = symbol_short!("large");
         let period = 202410u64;
 
@@ -1889,11 +1992,80 @@ mod verify_data_unit_tests {
             &archetype,
             &data_hash,
         );
-        client.mint_wrap(&user, &period, &archetype, &data_hash, &signature);
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
 
         // Verify the large payload matches
         let result = client.verify_data(&user, &period, &large_payload);
         assert!(result, "verify_data must correctly verify large payloads");
+    }
+
+    /// Covers issue #256: large off-chain JSON payloads should not surprise
+    /// budget usage or hash verification behavior.
+    #[test]
+    fn verify_data_succeeds_with_representative_large_payload() {
+        let (env, contract_id, client, signing_key, _admin, user) = setup_env();
+
+        // Build a representative off-chain JSON report (~200KB) made of many
+        // repeated records, mimicking a real analytics batch payload.
+        let mut large_bytes: Vec<u8> = Vec::new();
+        for i in 0..4000u64 {
+            let line = std::format!(
+                "{{\"record\":{},\"user\":\"u-{}\",\"status\":\"processed\",\"score\":99.5}}\n",
+                i,
+                i
+            );
+            large_bytes.extend_from_slice(line.as_bytes());
+        }
+        assert!(
+            large_bytes.len() > 100_000,
+            "payload must be a representative large size, got {}",
+            large_bytes.len()
+        );
+        let large_payload = Bytes::from_slice(&env, &large_bytes);
+
+        let data_hash_raw = env.crypto().sha256(&large_payload);
+        let data_hash = BytesN::from_array(&env, &data_hash_raw.to_array());
+
+        let archetype = symbol_short!("large");
+        let period = 202501u64;
+
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+        client.mint_wrap(&user, &period, &archetype, &data_hash, &1u32, &signature);
+
+        // Reset the cost trackers so the budget below reflects only `verify_data`.
+        env.budget().reset_tracker();
+        let cpu_before = env.budget().cpu_instruction_cost();
+
+        let result = client.verify_data(&user, &period, &large_payload);
+
+        let cpu_after = env.budget().cpu_instruction_cost();
+        let sha_tracker = env.budget().tracker(ContractCostType::ComputeSha256Hash);
+
+        assert!(
+            result,
+            "verify_data must accept the exact large payload bytes"
+        );
+        assert!(
+            cpu_after > cpu_before,
+            "verify_data must consume cpu budget for a large payload ({} -> {})",
+            cpu_before,
+            cpu_after
+        );
+        assert!(
+            sha_tracker
+                .inputs
+                .is_some_and(|n| n >= large_bytes.len() as u64),
+            "sha256 must hash the full payload (inputs = {:?})",
+            sha_tracker.inputs
+        );
     }
 }
 
@@ -1937,7 +2109,7 @@ fn test_get_latest_wrap_multiple_wraps() {
     let hash2 = BytesN::from_array(&env, &[20u8; 32]);
     let hash3 = BytesN::from_array(&env, &[30u8; 32]);
 
-    let sig1 = sign_payload(
+    let sig1 = sign_payload_versioned(
         &env,
         &signing_key,
         &contract_id,
@@ -1947,7 +2119,7 @@ fn test_get_latest_wrap_multiple_wraps() {
         &hash1,
         CURRENT_PAYLOAD_VERSION,
     );
-    let sig2 = sign_payload(
+    let sig2 = sign_payload_versioned(
         &env,
         &signing_key,
         &contract_id,
@@ -1957,7 +2129,7 @@ fn test_get_latest_wrap_multiple_wraps() {
         &hash2,
         CURRENT_PAYLOAD_VERSION,
     );
-    let sig3 = sign_payload(
+    let sig3 = sign_payload_versioned(
         &env,
         &signing_key,
         &contract_id,
@@ -1968,21 +2140,41 @@ fn test_get_latest_wrap_multiple_wraps() {
         CURRENT_PAYLOAD_VERSION,
     );
 
-    client.mint_wrap(&user, &202401, &archetype, &hash1, &CURRENT_PAYLOAD_VERSION, &sig1);
+    client.mint_wrap(
+        &user,
+        &202401,
+        &archetype,
+        &hash1,
+        &CURRENT_PAYLOAD_VERSION,
+        &sig1,
+    );
     let latest1 = client.get_latest_wrap(&user).unwrap();
     assert_eq!(latest1.period, 202401);
     assert_eq!(latest1.data_hash, hash1);
 
-    client.mint_wrap(&user, &202402, &archetype, &hash2, &CURRENT_PAYLOAD_VERSION, &sig2);
+    client.mint_wrap(
+        &user,
+        &202402,
+        &archetype,
+        &hash2,
+        &CURRENT_PAYLOAD_VERSION,
+        &sig2,
+    );
     let latest2 = client.get_latest_wrap(&user).unwrap();
     assert_eq!(latest2.period, 202402);
     assert_eq!(latest2.data_hash, hash2);
 
-    client.mint_wrap(&user, &202403, &archetype, &hash3, &CURRENT_PAYLOAD_VERSION, &sig3);
+    client.mint_wrap(
+        &user,
+        &202403,
+        &archetype,
+        &hash3,
+        &CURRENT_PAYLOAD_VERSION,
+        &sig3,
+    );
     let latest3 = client.get_latest_wrap(&user).unwrap();
     assert_eq!(latest3.period, 202403);
     assert_eq!(latest3.data_hash, hash3);
 
     assert_eq!(client.balance_of(&user), 3);
 }
-

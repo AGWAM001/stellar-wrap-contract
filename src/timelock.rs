@@ -197,10 +197,8 @@ pub(crate) fn cancel(e: Env, id: BytesN<32>) {
     }
 
     remove_op(&e, &id);
-    e.events().publish(
-        (symbol_short!("timelock"), symbol_short!("cancel")),
-        id,
-    );
+    e.events()
+        .publish((symbol_short!("timelock"), symbol_short!("cancel")), id);
 }
 
 /// Admin-only: apply a scheduled operation whose ETA has passed.

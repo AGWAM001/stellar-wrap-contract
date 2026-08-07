@@ -69,20 +69,34 @@ Returned by `health()`, reports:
 
 - `initialize(e: Env, admin: Address, admin_pubkey: BytesN<32>)`
 - `update_admin(e: Env, new_admin: Address)`
-- `mint_wrap(e: Env, user: Address, period: u64, archetype: Symbol, data_hash: BytesN<32>, signature: BytesN<64>)`
+- `mint_wrap(e: Env, user: Address, period: u64, archetype: Symbol, data_hash: BytesN<32>, payload_version: u32, signature: BytesN<64>)`
+- `mint_wrap_batch(e: Env, items: Vec<BatchWrapItem>, aggregated_signature: Option<BytesN<64>>)`
+- `revoke_wrap(e: Env, user: Address, period: u64, reason_hash: BytesN<32>)`
+- `transfer_wrap(e: Env, from: Address, to: Address, period: u64)`
+- `expire_wrap(e: Env, user: Address, period: u64)`
 - `migrate(e: Env, version: u32)`
+- `upgrade(e: Env, new_wasm_hash: BytesN<32>)`
+
 ### Mint signature payload versioning
 
-The contract requires mint signatures over a versioned canonical payload. The current payload format is:
+The contract requires mint signatures over a canonical, versioned payload. The
+current payload (`CURRENT_PAYLOAD_VERSION = 1`) is the byte-level concatenation
+of:
 
-- `0x01` — payload version byte
-- `XDR(contract_address)`
+- `MINT_DOMAIN_SEPARATOR` — the raw ASCII bytes `"stellar-wrap-v1"` (15 bytes, **not** XDR-encoded)
+- `XDR(payload_version)` — a `u32` that must equal `1`
+- `XDR(contract_id)`
 - `XDR(user)`
 - `XDR(period)`
 - `XDR(archetype)`
 - `XDR(data_hash)`
 
-Backend signers must include this version byte in all new mint signatures. This version field allows the contract and backend to evolve safely without ambiguous verification behavior.
+`mint_wrap` rejects any `payload_version` other than the current one with
+`Error(Contract, #5)` (`InvalidSignature`) *before* verifying the signature, so
+clients must sign this exact byte layout. See
+[docs/signing-payload.md](docs/signing-payload.md) for the full reference and a
+TypeScript signer example.
+
 ### Read methods
 
 - `get_wrap(e: Env, user: Address, period: u64) -> Option<WrapRecord>`  
@@ -361,12 +375,15 @@ stellar contract invoke \
 
 ### Step 4: Mint your first wrap
 
-You need to sign a payload with your Ed25519 signing key. The payload includes:
-- Contract address
-- User address (who will receive the wrap)
-- Period (YYYYMM format)
-- Archetype (symbol)
-- Data hash (SHA-256 of your wrap data)
+You need to sign a payload with your Ed25519 signing key. The payload binds all
+the `mint_wrap` arguments in this exact order:
+
+- `user` — address who will receive the wrap (authorizes the call)
+- `period` — in `YYYYMM` format (e.g. `202401` for January 2024)
+- `archetype` — symbol classifying the wrap (e.g. `arch`)
+- `data_hash` — SHA-256 of your wrap data
+- `payload_version` — must be `1` (current payload version)
+- `signature` — Ed25519 signature over the canonical payload
 
 Example using a signing script (you'll need to implement this based on your Ed25519 library):
 
@@ -383,6 +400,7 @@ SIGNATURE=$(sign-payload \
   --period 202401 \
   --archetype "arch" \
   --data_hash $DATA_HASH \
+  --payload_version 1 \
   --private-key <ED25519_PRIVATE_KEY>)
 
 # 3. Mint the wrap
@@ -395,6 +413,7 @@ stellar contract invoke \
   --period 202401 \
   --archetype "arch" \
   --data_hash $DATA_HASH \
+  --payload_version 1 \
   --signature $SIGNATURE
 ```
 

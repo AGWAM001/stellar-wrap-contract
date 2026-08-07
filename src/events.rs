@@ -23,7 +23,7 @@ pub enum MintEventType {
 
 impl MintEventType {
     /// Convert this event type to a Soroban `Symbol`.
-    pub fn to_symbol(&self, e: &Env) -> Symbol {
+    pub fn to_symbol(self, e: &Env) -> Symbol {
         match self {
             MintEventType::Mint => Symbol::new(e, "mint"),
             MintEventType::Transition => Symbol::new(e, "trans"),

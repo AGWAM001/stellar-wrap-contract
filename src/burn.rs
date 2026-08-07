@@ -65,7 +65,7 @@ pub(crate) fn burn_wrap(e: Env, user: Address, period: u64) {
 
     // Find and remove the period from the list
     let mut found_index: Option<u32> = None;
-    for (i, &p) in periods.iter().enumerate() {
+    for (i, p) in periods.iter().enumerate() {
         if p == period {
             found_index = Some(i as u32);
             break;
@@ -83,5 +83,6 @@ pub(crate) fn burn_wrap(e: Env, user: Address, period: u64) {
     }
 
     // 7. Emit burn event AFTER state mutation
-    e.events().publish((symbol_short!("burn"), user.clone(), period), user);
+    e.events()
+        .publish((symbol_short!("burn"), user.clone(), period), user);
 }

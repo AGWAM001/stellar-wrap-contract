@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use soroban_sdk::Env;
 use stellar_wrap_contract::{StellarWrapContract, StellarWrapContractClient};
 
