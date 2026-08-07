@@ -492,6 +492,58 @@ fn test_verify_data_no_wrap_exists() {
 }
 
 #[test]
+fn test_mint_wrap_rejects_period_tampered_signature() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[21u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
+    let period_a = 202401u64;
+    let period_b = 202402u64;
+
+    // Sign the canonical payload for period A only.
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period_a,
+        &archetype,
+        &data_hash,
+    );
+
+    // Submitting that signature with a different period must be rejected.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap(
+            &user,
+            &period_b,
+            &archetype,
+            &data_hash,
+            &CURRENT_PAYLOAD_VERSION,
+            &signature,
+        );
+    }));
+    assert!(
+        result.is_err(),
+        "signature for period A must not verify when period B is submitted"
+    );
+
+    // No wrap or wrap-count may be written for either period.
+    assert!(client.get_wrap(&user, &period_a).is_none());
+    assert!(client.get_wrap(&user, &period_b).is_none());
+    assert_eq!(client.balance_of(&user), 0);
+}
+
+#[test]
 fn test_get_wrap_existing_user_nonexistent_period() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
