@@ -78,7 +78,7 @@ pub(crate) fn mint_wrap(
     validate_payload_version(&e, payload_version);
 
     let admin_pubkey = get_admin_pubkey(&e);
-    let _ = verify_mint_signature(
+    if let Err(err) = verify_mint_signature(
         &e,
         &admin_pubkey,
         &e.current_contract_address(),
@@ -88,7 +88,9 @@ pub(crate) fn mint_wrap(
         &data_hash,
         payload_version,
         &signature,
-    );
+    ) {
+        panic_with_error!(e, err);
+    }
 
     let wrap_key = DataKey::Wrap(user.clone(), period);
     if e.storage().persistent().has(&wrap_key) {
@@ -234,14 +236,16 @@ pub(crate) fn mint_wrap_batch(
             item.user.require_auth();
         }
         let payload_version = items.get(0).unwrap().payload_version;
-        let _ = crate::signature::verify_batch_aggregated_signature(
+        if let Err(err) = crate::signature::verify_batch_aggregated_signature(
             &e,
             &admin_pubkey,
             &contract_id,
             &items,
             payload_version,
             &agg_sig,
-        );
+        ) {
+            panic_with_error!(e, err);
+        }
     } else {
         // Individual signatures inside batch items
         for item in items.iter() {
@@ -249,7 +253,7 @@ pub(crate) fn mint_wrap_batch(
             validate_payload_version(&e, item.payload_version);
             item.user.require_auth();
 
-            let _ = verify_mint_signature(
+            if let Err(err) = verify_mint_signature(
                 &e,
                 &admin_pubkey,
                 &contract_id,
@@ -259,7 +263,9 @@ pub(crate) fn mint_wrap_batch(
                 &item.data_hash,
                 item.payload_version,
                 &item.signature,
-            );
+            ) {
+                panic_with_error!(e, err);
+            }
         }
     }
 

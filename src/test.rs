@@ -536,10 +536,76 @@ fn test_mint_wrap_rejects_period_tampered_signature() {
         result.is_err(),
         "signature for period A must not verify when period B is submitted"
     );
+    assert_maps_to_invalid_signature(&result);
 
     // No wrap or wrap-count may be written for either period.
     assert!(client.get_wrap(&user, &period_a).is_none());
     assert!(client.get_wrap(&user, &period_b).is_none());
+    assert_eq!(client.balance_of(&user), 0);
+}
+
+/// Asserts that a caught mint failure surfaced the contract's
+/// `InvalidSignature` error (`Error(Contract, #5)`) rather than a raw host
+/// `Crypto`/`InvalidInput` error.
+fn assert_maps_to_invalid_signature(
+    result: &std::result::Result<(), std::boxed::Box<dyn std::any::Any + Send>>,
+) {
+    let err = result
+        .as_ref()
+        .expect_err("the mint call must have failed")
+        .downcast_ref::<std::string::String>()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        err.contains("Error(Contract, #5)"),
+        "failed signature check must surface InvalidSignature (#5), got: {err}"
+    );
+}
+
+#[test]
+fn test_mint_wrap_rejects_signature_from_wrong_key() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[22u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let data_hash = BytesN::from_array(&env, &[42u8; 32]);
+    let period = 202401u64;
+
+    // Sign with a key other than the configured admin pubkey.
+    let wrong_key = SigningKey::from_bytes(&[77u8; 32]);
+    let signature = sign_payload(
+        &env,
+        &wrong_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &data_hash,
+    );
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap(
+            &user,
+            &period,
+            &archetype,
+            &data_hash,
+            &CURRENT_PAYLOAD_VERSION,
+            &signature,
+        );
+    }));
+    assert_maps_to_invalid_signature(&result);
+
+    // Nothing may be written by the failed mint.
+    assert!(client.get_wrap(&user, &period).is_none());
     assert_eq!(client.balance_of(&user), 0);
 }
 
