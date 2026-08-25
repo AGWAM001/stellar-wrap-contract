@@ -2296,3 +2296,40 @@ fn test_get_latest_wrap_multiple_wraps() {
 
     assert_eq!(client.balance_of(&user), 3);
 }
+
+/// Issue #473 — `update_admin` must reject a call that is not authorized by
+/// the current admin.
+///
+/// `update_admin` calls `current_admin.require_auth()`.  When the mock-auth
+/// context only covers a *different* address (a non-admin attacker), the
+/// Soroban test framework raises an auth failure, which manifests as a panic.
+#[test]
+#[should_panic]
+fn test_update_admin_by_non_admin_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+
+    // Provide auth only for the attacker — the admin has not signed anything.
+    // update_admin calls `current_admin.require_auth()`, so the Soroban
+    // framework will reject the invocation and panic.
+    client.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &attacker,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_admin",
+            args: (&new_admin,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    // Must panic: attacker is not the current admin.
+    client.update_admin(&new_admin);
+}
