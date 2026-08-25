@@ -2296,3 +2296,71 @@ fn test_get_latest_wrap_multiple_wraps() {
 
     assert_eq!(client.balance_of(&user), 3);
 }
+
+/// Issue #478 — `mint_wrap` must reject a submission where the signature is
+/// valid but covers a *different* data hash than the one supplied.
+///
+/// The admin signs a payload that includes the data hash.  If the caller
+/// swaps in a different hash at submission time, the reconstructed payload
+/// no longer matches what was signed, so `verify_mint_signature` must
+/// surface `ContractError::InvalidSignature` (#5).
+#[test]
+fn test_mint_wrap_valid_signature_wrong_data_hash_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[50u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let period = 202401u64;
+
+    // The admin signs over `correct_hash`.
+    let correct_hash = BytesN::from_array(&env, &[0xAAu8; 32]);
+    let wrong_hash = BytesN::from_array(&env, &[0xBBu8; 32]);
+
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &correct_hash,
+    );
+
+    // Submitting with a different hash must be rejected as InvalidSignature (#5).
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap(
+            &user,
+            &period,
+            &archetype,
+            &wrong_hash,
+            &CURRENT_PAYLOAD_VERSION,
+            &signature,
+        );
+    }));
+
+    assert!(
+        result.is_err(),
+        "mint_wrap must fail when the data hash differs from the signed payload"
+    );
+    assert_maps_to_invalid_signature(&result);
+
+    // No wrap record must have been written for either hash.
+    assert!(
+        client.get_wrap(&user, &period).is_none(),
+        "no wrap must be stored after a wrong-hash rejection"
+    );
+    assert_eq!(
+        client.balance_of(&user),
+        0,
+        "balance must remain zero after a wrong-hash rejection"
+    );
+}
