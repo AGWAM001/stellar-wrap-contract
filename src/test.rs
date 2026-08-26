@@ -244,7 +244,7 @@ fn test_initialize_after_rejected_zero_pubkey_succeeds() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.initialize(&admin, &BytesN::from_array(&env, &[0u8; 32]));
     }));
-    assert!(result.is_err(), "zero admin pubkey must be rejected");
+    assert!(result.is_err(), "Zero admin public key must be rejected.");
     assert!(!client.health().initialized);
 
     // A subsequent valid initialization still succeeds.
