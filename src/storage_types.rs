@@ -57,12 +57,25 @@ impl WrapLifecycleFSM {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WrapRecord {
+    /// Timestamp associated with the wrap record.
     pub timestamp: u64,
+
+    /// 32-byte hash associated with the wrapped data.
     pub data_hash: BytesN<32>,
+
+    /// Symbol identifying the wrap's archetype.
     pub archetype: Symbol,
-    pub period: u64, // Standardized to u64 for better indexing/sorting
+
+    /// Period identifier used with the user to address this record in persistent storage.
+    pub period: u64,
+
+    /// Current lifecycle state and its last update timestamp.
     pub fsm: WrapLifecycleFSM,
+
+    /// Optional description associated with the wrap.
     pub description: Option<String>,
+
+    /// Optional image URL associated with the wrap.
     pub image_url: Option<String>,
 }
 
