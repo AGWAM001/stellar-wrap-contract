@@ -85,7 +85,7 @@ pub(crate) fn bridge_wrap_out(
 
     let now = e.ledger().timestamp();
 
-    if !wrap_record.fsm.transition_to(WrapState::Pending, now) {
+    if !wrap_record.fsm.transition_to(WrapState::Bridged, now) {
         panic_with_error!(e, ContractError::InvalidStateTransition);
     }
     e.storage().persistent().set(&wrap_key, &wrap_record);
@@ -128,8 +128,50 @@ pub(crate) fn bridge_wrap_out(
     next_nonce
 }
 
+/// Restore a bridged wrap when the destination chain rejects the transfer.
+/// Only the configured bridge relayer may call this operation.
+pub(crate) fn bridge_wrap_refund(e: Env, outbound_nonce: u64) {
+    crate::admin::require_not_paused(&e);
+
+    let relayer = get_bridge_relayer(&e)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::BridgeNotInitialized));
+    relayer.require_auth();
+
+    let request_key = DataKey::OutboundBridgeRequest(outbound_nonce);
+    let request: OutboundBridgeRequest = e
+        .storage()
+        .persistent()
+        .get(&request_key)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::InvalidBridgePayload));
+    let wrap_key = DataKey::Wrap(request.sender.clone(), request.period);
+    let mut wrap_record: WrapRecord = e
+        .storage()
+        .persistent()
+        .get(&wrap_key)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::WrapNotFound));
+
+    let now = e.ledger().timestamp();
+    if !wrap_record.fsm.restore_from_bridge(now) {
+        panic_with_error!(e, ContractError::InvalidStateTransition);
+    }
+
+    e.storage().persistent().set(&wrap_key, &wrap_record);
+    e.storage()
+        .persistent()
+        .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+    e.events().publish(
+        (symbol_short!("br_refund"), request.sender.clone(), request.period),
+        outbound_nonce,
+    );
+}
+
 /// Fulfill an inbound cross-chain token/wrap bridge transfer.
 /// Called by authorized relayer to process wraps coming from an external chain.
+///
+/// An opted-out recipient rejects the message without creating or updating any
+/// wrap records. The inbound nonce is still consumed and a `br_in_rej` event
+/// is emitted so the relayer does not retry the rejected message indefinitely.
 pub(crate) fn bridge_wrap_in(
     e: Env,
     source_chain: u32,
@@ -166,6 +208,17 @@ pub(crate) fn bridge_wrap_in(
     e.storage()
         .persistent()
         .extend_ttl(&processed_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+    if e.storage()
+        .persistent()
+        .has(&DataKey::OptOut(recipient.clone()))
+    {
+        e.events().publish(
+            (symbol_short!("br_in_rej"), recipient, source_chain),
+            (source_nonce, period),
+        );
+        return;
+    }
 
     let now = e.ledger().timestamp();
     let wrap_key = DataKey::Wrap(recipient.clone(), period);
@@ -248,9 +301,44 @@ pub(crate) fn bridge_wrap_in(
         }
     } else {
         let mut existing_record: WrapRecord = e.storage().persistent().get(&wrap_key).unwrap();
-        existing_record.fsm.state = WrapState::Active;
-        existing_record.fsm.updated_at = now;
+        if !existing_record.fsm.transition_to(WrapState::Active, now) {
+            panic_with_error!(e, ContractError::InvalidStateTransition);
+        }
         e.storage().persistent().set(&wrap_key, &existing_record);
+
+        e.events().publish(
+            (
+                crate::events::MintEventType::Transition.to_symbol(&e),
+                recipient.clone(),
+                period,
+            ),
+            crate::events::MintEventData::Transition(recipient.clone(), period, WrapState::Active),
+        );
+    }
+
+    let wrap_periods_key = DataKey::WrapPeriods(recipient.clone());
+    let mut wrap_periods: soroban_sdk::Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&wrap_periods_key)
+        .unwrap_or(soroban_sdk::Vec::new(&e));
+    if !wrap_periods.contains(period) {
+        wrap_periods.push_back(period);
+        e.storage()
+            .persistent()
+            .set(&wrap_periods_key, &wrap_periods);
+        e.storage()
+            .persistent()
+            .extend_ttl(&wrap_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+    }
+
+    let wrap_count: u32 = e
+        .storage()
+        .persistent()
+        .get(&DataKey::WrapCount(recipient.clone()))
+        .unwrap_or(0);
+    if wrap_count != wrap_periods.len() {
+        panic_with_error!(e, ContractError::StorageInvariantViolation);
     }
 
     let inbound_rec = InboundBridgeRecord {

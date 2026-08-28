@@ -132,7 +132,60 @@ fn test_bridge_wrap_out_success() {
     assert_eq!(request.data_hash, data_hash);
 
     let wrap = client.get_wrap(&user, &period).expect("wrap exists");
-    assert_eq!(wrap.fsm.state, WrapState::Pending);
+    assert_eq!(wrap.fsm.state, WrapState::Bridged);
+}
+
+#[test]
+fn test_bridged_wrap_blocks_escape_routes_and_supports_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, relayer, signing_key) = setup_test_env(&env);
+    client.set_bridge_relayer(&relayer);
+
+    let user = Address::generate(&env);
+    let period = 202608u64;
+    let archetype = symbol_short!("bridge");
+    let data_hash = BytesN::from_array(&env, &[55u8; 32]);
+    let signature = sign_mint_payload(
+        &env,
+        &signing_key,
+        &client.address,
+        &user,
+        period,
+        &archetype,
+        &data_hash,
+    );
+    client.mint_wrap(&user, &period, &archetype, &data_hash, &1, &signature);
+
+    let destination_chain = 137u32;
+    client.set_chain_status(&destination_chain, &true);
+    let destination = Bytes::from_array(&env, b"destination");
+    let outbound_nonce = client.bridge_wrap_out(&user, &destination_chain, &destination, &period);
+
+    let transfer_result = catch_unwind(AssertUnwindSafe(|| {
+        client.transfer_wrap(&user, &Address::generate(&env), &period);
+    }));
+    assert!(transfer_result.is_err());
+
+    let burn_result = catch_unwind(AssertUnwindSafe(|| {
+        client.burn_wrap(&user, &period);
+    }));
+    assert!(burn_result.is_err());
+
+    let reactivate_result = catch_unwind(AssertUnwindSafe(|| {
+        client.transition_wrap_state(&user, &period, &WrapState::Active);
+    }));
+    assert!(reactivate_result.is_err());
+
+    let second_bridge_result = catch_unwind(AssertUnwindSafe(|| {
+        client.bridge_wrap_out(&user, &destination_chain, &destination, &period);
+    }));
+    assert!(second_bridge_result.is_err());
+    assert_eq!(client.get_wrap(&user, &period).unwrap().fsm.state, WrapState::Bridged);
+
+    client.bridge_wrap_refund(&outbound_nonce);
+    assert_eq!(client.get_wrap(&user, &period).unwrap().fsm.state, WrapState::Active);
 }
 
 #[test]
@@ -214,6 +267,168 @@ fn test_bridge_wrap_in_success() {
 
     let wrap = client.get_wrap(&recipient, &period).expect("wrap exists");
     assert_eq!(wrap.fsm.state, WrapState::Active);
+}
+
+#[test]
+fn test_bridge_wrap_in_then_mint_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, relayer, signing_key) = setup_test_env(&env);
+    client.set_bridge_relayer(&relayer);
+    let source_chain = 1u32;
+    client.set_chain_status(&source_chain, &true);
+
+    let recipient = Address::generate(&env);
+    let bridge_period = 202607u64;
+    let bridge_archetype = symbol_short!("bridge");
+    let bridge_hash = BytesN::from_array(&env, &[99u8; 32]);
+    client.bridge_wrap_in(
+        &source_chain,
+        &101u64,
+        &recipient,
+        &bridge_period,
+        &bridge_archetype,
+        &bridge_hash,
+    );
+
+    let mint_period = 202608u64;
+    let mint_archetype = symbol_short!("mint");
+    let mint_hash = BytesN::from_array(&env, &[100u8; 32]);
+    let signature = sign_mint_payload(
+        &env,
+        &signing_key,
+        &client.address,
+        &recipient,
+        mint_period,
+        &mint_archetype,
+        &mint_hash,
+    );
+    client.mint_wrap(
+        &recipient,
+        &mint_period,
+        &mint_archetype,
+        &mint_hash,
+        &1,
+        &signature,
+    );
+
+    assert_eq!(client.get_wrap(&recipient, &mint_period).unwrap().period, mint_period);
+}
+
+#[test]
+fn test_bridge_wrap_in_then_transfer_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, relayer, _key) = setup_test_env(&env);
+    client.set_bridge_relayer(&relayer);
+    let source_chain = 1u32;
+    client.set_chain_status(&source_chain, &true);
+
+    let recipient = Address::generate(&env);
+    let destination = Address::generate(&env);
+    let period = 202607u64;
+    let archetype = symbol_short!("bridge");
+    let data_hash = BytesN::from_array(&env, &[101u8; 32]);
+    client.bridge_wrap_in(
+        &source_chain,
+        &102u64,
+        &recipient,
+        &period,
+        &archetype,
+        &data_hash,
+    );
+
+    client.set_transfer_fee(&Address::generate(&env), &Address::generate(&env), &0);
+    client.transfer_wrap(&recipient, &destination, &period);
+
+    assert!(client.get_wrap(&recipient, &period).is_none());
+    assert_eq!(client.get_wrap(&destination, &period).unwrap().period, period);
+}
+
+#[test]
+fn test_bridge_wrap_in_rejects_opted_out_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, relayer, _key) = setup_test_env(&env);
+
+    client.set_bridge_relayer(&relayer);
+    let source_chain = 1u32;
+    client.set_chain_status(&source_chain, &true);
+
+    let recipient = Address::generate(&env);
+    let period = 202607u64;
+    let archetype = symbol_short!("bridge");
+    let data_hash = BytesN::from_array(&env, &[77u8; 32]);
+    let source_nonce = 303u64;
+
+    client.opt_out(&recipient);
+    client.bridge_wrap_in(
+        &source_chain,
+        &source_nonce,
+        &recipient,
+        &period,
+        &archetype,
+        &data_hash,
+    );
+
+    assert!(client.is_inbound_nonce_processed(&source_chain, &source_nonce));
+    assert_eq!(client.get_wrap(&recipient, &period), None);
+    assert_eq!(
+        client.get_inbound_bridge_record(&source_chain, &source_nonce),
+        None
+    );
+}
+
+#[test]
+fn test_bridge_wrap_in_rejects_terminal_states() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, relayer, _key) = setup_test_env(&env);
+
+    client.set_bridge_relayer(&relayer);
+    let source_chain = 1u32;
+    client.set_chain_status(&source_chain, &true);
+
+    for (source_nonce, state) in [
+        (401u64, WrapState::Cancelled),
+        (402u64, WrapState::Archived),
+        (403u64, WrapState::Expired),
+    ] {
+        let recipient = Address::generate(&env);
+        let period = 202607u64 + source_nonce;
+        let wrap_key = DataKey::Wrap(recipient.clone(), period);
+        let record = WrapRecord {
+            timestamp: 100,
+            data_hash: BytesN::from_array(&env, &[66u8; 32]),
+            archetype: symbol_short!("existing"),
+            period,
+            fsm: WrapLifecycleFSM::new(state, 100),
+            description: None,
+            image_url: None,
+        };
+
+        env.as_contract(&client.address, || {
+            env.storage().persistent().set(&wrap_key, &record);
+        });
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            client.bridge_wrap_in(
+                &source_chain,
+                &source_nonce,
+                &recipient,
+                &period,
+                &symbol_short!("bridge"),
+                &BytesN::from_array(&env, &[77u8; 32]),
+            );
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(client.get_wrap(&recipient, &period).unwrap().fsm.state, state);
+    }
 }
 
 #[test]
