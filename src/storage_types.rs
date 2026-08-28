@@ -120,6 +120,8 @@ pub enum TimelockAction {
     SetWhitelistRoot(BytesN<32>),
     /// Change the timelock delay itself (seconds).
     SetTimelockDelay(u64),
+    /// Configure the bridge relayer set and threshold for a given chain.
+    SetBridgeRelayers(u32, BridgeRelayerSet),
 }
 
 /// A scheduled timelock operation awaiting execution.
@@ -157,6 +159,13 @@ pub struct InboundBridgeRecord {
     pub archetype: Symbol,
     pub data_hash: BytesN<32>,
     pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BridgeRelayerSet {
+    pub relayers: soroban_sdk::Vec<BytesN<32>>,
+    pub threshold: u32,
 }
 
 #[contracttype]
@@ -237,8 +246,8 @@ pub enum DataKey {
     /// Ids of every currently scheduled timelock operation (instance-level).
     TimelockOps,
     // Token Bridge storage keys:
-    /// Address authorized as the cross-chain token bridge relayer.
-    BridgeRelayer,
+    /// Authorized relayer set (pubkeys) and threshold for a given source chain.
+    BridgeRelayerSet(u32),
     /// Status (enabled/disabled) of a supported target/source chain ID.
     BridgeChainStatus(u32),
     /// Current outbound bridge request sequence counter.
