@@ -165,6 +165,57 @@ fn test_revoke_emits_event_multi_user() {
 }
 
 #[test]
+fn test_revoke_non_latest_wrap_preserves_latest() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[16u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let older_hash = BytesN::from_array(&env, &[10u8; 32]);
+    let newer_hash = BytesN::from_array(&env, &[20u8; 32]);
+    let older_period = 202401u64;
+    let newer_period = 202402u64;
+
+    let older_sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        older_period,
+        &archetype,
+        &older_hash,
+    );
+    let newer_sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        newer_period,
+        &archetype,
+        &newer_hash,
+    );
+
+    client.mint_wrap(&user, &older_period, &archetype, &older_hash, &1u32, &older_sig);
+    client.mint_wrap(&user, &newer_period, &archetype, &newer_hash, &1u32, &newer_sig);
+
+    let reason = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &older_period, &reason);
+
+    assert!(client.get_wrap(&user, &older_period).is_none());
+    let latest = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest.period, newer_period);
+    assert_eq!(latest.data_hash, newer_hash);
+}
+
+#[test]
 fn test_balance_of_and_count() {
     let env = Env::default();
     let contract_id = env.register_contract(None, StellarWrapContract);
