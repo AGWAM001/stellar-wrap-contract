@@ -793,3 +793,5 @@ mod test_utils;
 mod test_vectors;
 #[cfg(test)]
 mod transfer_test;
+#[cfg(test)]
+mod queries_test;
