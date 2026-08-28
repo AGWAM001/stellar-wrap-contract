@@ -80,6 +80,7 @@ pub fn compute_whitelist_leaf(e: &Env, user: &Address) -> BytesN<32> {
 /// root fully replaces the previous one, so rotating the whitelist is a single
 /// cheap write. Emits a `("whitelist", "root")` event for indexers.
 pub(crate) fn set_whitelist_root(e: Env, root: BytesN<32>) {
+    crate::timelock::require_direct_call_allowed(&e);
     crate::admin::read_admin(&e).require_auth();
     e.storage().instance().set(&DataKey::WhitelistRoot, &root);
     e.events()
@@ -88,6 +89,7 @@ pub(crate) fn set_whitelist_root(e: Env, root: BytesN<32>) {
 
 /// Admin-only: remove the whitelist root, disabling whitelist gating.
 pub(crate) fn clear_whitelist_root(e: Env) {
+    crate::timelock::require_direct_call_allowed(&e);
     crate::admin::read_admin(&e).require_auth();
     e.storage().instance().remove(&DataKey::WhitelistRoot);
     e.events()

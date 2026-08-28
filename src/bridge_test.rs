@@ -19,6 +19,7 @@ fn setup_test_env<'a>(
     let admin = Address::generate(env);
     let relayer = Address::generate(env);
 
+    env.mock_all_auths();
     client.initialize(&admin, &admin_pubkey);
     (client, admin, relayer, signing_key)
 }
