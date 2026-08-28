@@ -1570,6 +1570,114 @@ fn test_burn_wrap_multiple_users_independent() {
     assert!(client.get_wrap(&user_b, &period).is_some());
 }
 
+#[test]
+fn test_burn_then_transfer_remaining_wrap_succeeds() {
+    // Acceptance criterion: mint two, burn one, transfer the other successfully.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[41u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+    // Configure fee with amount=0 so transfer succeeds without token balance
+    client.set_transfer_fee(&token_id, &fee_recipient, &0i128);
+
+    let archetype = symbol_short!("arch");
+    let period1 = 202401u64;
+    let period2 = 202402u64;
+
+    let hash1 = BytesN::from_array(&env, &[41u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[42u8; 32]);
+
+    let sig1 = sign_payload(&env, &signing_key, &contract_id, &user, period1, &archetype, &hash1);
+    let sig2 = sign_payload(&env, &signing_key, &contract_id, &user, period2, &archetype, &hash2);
+
+    client.mint_wrap(&user, &period1, &archetype, &hash1, &1u32, &sig1);
+    client.mint_wrap(&user, &period2, &archetype, &hash2, &1u32, &sig2);
+
+    // Burn period1 — WrapPeriods must be updated so transfer of period2 works
+    client.burn_wrap(&user, &period1);
+
+    assert!(client.get_wrap(&user, &period1).is_none());
+    assert_eq!(client.balance_of(&user), 1);
+
+    // Transfer period2 to recipient — must not panic with StorageInvariantViolation
+    client.transfer_wrap(&user, &recipient, &period2);
+
+    assert!(client.get_wrap(&user, &period2).is_none());
+    assert!(client.get_wrap(&recipient, &period2).is_some());
+    assert_eq!(client.balance_of(&user), 0);
+    assert_eq!(client.balance_of(&recipient), 1);
+}
+
+#[test]
+fn test_wrap_count_equals_wrap_periods_len_after_mint_burn_transfer() {
+    // Acceptance criterion: WrapCount == WrapPeriods.len() holds after any
+    // sequence of mint / burn / transfer.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[42u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let other = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+    // Configure fee with amount=0 so transfer succeeds without token balance
+    client.set_transfer_fee(&token_id, &fee_recipient, &0i128);
+
+    let archetype = symbol_short!("arch");
+    let periods: [u64; 4] = [202401, 202402, 202403, 202404];
+    let hashes: [[u8; 32]; 4] = [[10; 32], [20; 32], [30; 32], [40; 32]];
+
+    // Mint all four
+    for i in 0..4 {
+        let hash = BytesN::from_array(&env, &hashes[i]);
+        let sig = sign_payload(&env, &signing_key, &contract_id, &user, periods[i], &archetype, &hash);
+        client.mint_wrap(&user, &periods[i], &archetype, &hash, &1u32, &sig);
+    }
+    assert_eq!(client.balance_of(&user), 4);
+
+    // Burn 202401 → count 3
+    client.burn_wrap(&user, &periods[0]);
+    assert_eq!(client.balance_of(&user), 3);
+
+    // Burn 202402 → count 2
+    client.burn_wrap(&user, &periods[1]);
+    assert_eq!(client.balance_of(&user), 2);
+
+    // Transfer 202403 to other → user count 1, other count 1
+    client.transfer_wrap(&user, &other, &periods[2]);
+    assert_eq!(client.balance_of(&user), 1);
+    assert_eq!(client.balance_of(&other), 1);
+
+    // Transfer remaining 202404 — must not panic with StorageInvariantViolation
+    client.transfer_wrap(&user, &other, &periods[3]);
+    assert_eq!(client.balance_of(&user), 0);
+    assert_eq!(client.balance_of(&other), 2);
+}
+
 // ============================================================================
 // get_all_wraps_for_user tests
 // ============================================================================
