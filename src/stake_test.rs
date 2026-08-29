@@ -27,6 +27,7 @@ fn test_stake_basic_flow() {
     let pubkey = BytesN::from_array(&env, &[1u8; 32]);
     let user = Address::generate(&env);
 
+    env.mock_all_auths();
     client.initialize(&admin, &pubkey);
     env.mock_all_auths();
 

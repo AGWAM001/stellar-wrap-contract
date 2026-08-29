@@ -3,7 +3,7 @@
 extern crate std;
 
 use super::*;
-use crate::test_utils::{sign_payload, sign_payload_versioned};
+use crate::test_utils::{decode_events, sign_payload, sign_payload_versioned};
 use ed25519_dalek::SigningKey;
 use soroban_sdk::{
     symbol_short,
@@ -215,8 +215,117 @@ fn test_initialize_twice_fails() {
     let admin = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 32]);
 
+    env.mock_all_auths();
     client.initialize(&admin, &pubkey);
     client.initialize(&admin, &pubkey);
+}
+
+#[test]
+#[should_panic]
+fn test_initialize_without_admin_auth_fails() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.initialize(&admin, &pubkey);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #26)")]
+fn test_defeated_admin_proposal_is_persisted() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let proposer = Address::generate(&env);
+    let proposed_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &pubkey);
+    let proposal_id = client.create_admin_proposal(&proposer, &proposed_admin, &100);
+    client.vote_admin_proposal(&proposer, &proposal_id, &false);
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp += 101;
+    });
+
+    client.execute_admin_proposal(&proposal_id);
+
+    let proposal = client.get_admin_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Defeated);
+    let events = decode_events(&env);
+    let (topics, _) = events.last().expect("defeat event was not emitted");
+    let event_name: Symbol = topics[1].try_into_val(&env).unwrap();
+    assert_eq!(event_name, symbol_short!("defeated"));
+
+    client.execute_admin_proposal(&proposal_id);
+}
+
+#[test]
+fn test_passing_admin_proposal_is_timelocked() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let proposer = Address::generate(&env);
+    let proposed_admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &pubkey);
+    client.enable_timelock(&timelock::MIN_DELAY);
+    let proposal_id = client.create_admin_proposal(&proposer, &proposed_admin, &100);
+    client.vote_admin_proposal(&proposer, &proposal_id, &true);
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp += 101;
+    });
+
+    client.execute_admin_proposal(&proposal_id);
+
+    assert_eq!(client.get_admin().unwrap(), admin);
+    let action = TimelockAction::SetAdmin(proposed_admin.clone());
+    let operation_id = client.timelock_operation_id(&action);
+    assert!(client.timelock_operation(&operation_id).is_some());
+
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp += timelock::MIN_DELAY;
+    });
+    client.timelock_execute(&operation_id);
+
+    assert_eq!(client.get_admin().unwrap(), proposed_admin);
+}
+
+#[test]
+fn test_whitelist_root_requires_timelock_after_enable() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let initial_root = BytesN::from_array(&env, &[1u8; 32]);
+    let scheduled_root = BytesN::from_array(&env, &[2u8; 32]);
+    let pubkey = BytesN::from_array(&env, &[3u8; 32]);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &pubkey);
+    client.set_whitelist_root(&initial_root);
+    client.enable_timelock(&timelock::MIN_DELAY);
+
+    let direct_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_whitelist_root(&scheduled_root);
+    }));
+    assert!(direct_result.is_err());
+    assert_eq!(client.get_whitelist_root(), Some(initial_root));
+
+    let action = TimelockAction::SetWhitelistRoot(scheduled_root.clone());
+    let operation_id = client.timelock_schedule(&action);
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp += timelock::MIN_DELAY;
+    });
+    client.timelock_execute(&operation_id);
+
+    assert_eq!(client.get_whitelist_root(), Some(scheduled_root));
 }
 
 #[test]

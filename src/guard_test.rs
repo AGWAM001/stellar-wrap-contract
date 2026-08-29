@@ -86,6 +86,7 @@ fn test_zero_hash_mint_failure_leaves_no_guard_entry() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
 
+    env.mock_all_auths();
     client.initialize(&admin, &admin_pubkey);
     env.mock_all_auths();
 
