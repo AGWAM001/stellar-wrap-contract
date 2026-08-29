@@ -2352,3 +2352,63 @@ fn test_storage_md_documents_every_datakey_variant() {
         );
     }
 }
+
+#[test]
+fn test_update_latest_period_option_storage_accounting() {
+    use crate::mint::update_latest_period;
+    use crate::storage_accounting::{estimate_latest_bytes_new, get_storage_bytes};
+
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let _client = StellarWrapContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    let initial_bytes = env.as_contract(&contract_id, || get_storage_bytes(&env));
+
+    // 1. First insert with period 0 (Option is None -> Option is Some(0)).
+    // Storage bytes must increase because entry was missing.
+    env.as_contract(&contract_id, || {
+        update_latest_period(&env, &user, 0);
+    });
+
+    let bytes_after_first = env.as_contract(&contract_id, || get_storage_bytes(&env));
+    assert_eq!(
+        bytes_after_first - initial_bytes,
+        estimate_latest_bytes_new(),
+        "storage accounting must add bytes when entry was missing, even for period 0"
+    );
+
+    let latest_key = DataKey::LatestPeriod(user.clone());
+    let stored_period: Option<u64> =
+        env.as_contract(&contract_id, || env.storage().persistent().get(&latest_key));
+    assert_eq!(stored_period, Some(0));
+
+    // 2. Second update with higher period 10 (Option is Some(0) -> Some(10)).
+    // Storage bytes must not increase because entry already existed.
+    env.as_contract(&contract_id, || {
+        update_latest_period(&env, &user, 10);
+    });
+
+    let bytes_after_second = env.as_contract(&contract_id, || get_storage_bytes(&env));
+    assert_eq!(
+        bytes_after_second, bytes_after_first,
+        "updating an existing LatestPeriod entry must not add duplicate storage bytes"
+    );
+
+    let updated_period: Option<u64> =
+        env.as_contract(&contract_id, || env.storage().persistent().get(&latest_key));
+    assert_eq!(updated_period, Some(10));
+
+    // 3. Third update with lower period 5 (should be ignored).
+    env.as_contract(&contract_id, || {
+        update_latest_period(&env, &user, 5);
+    });
+
+    let bytes_after_third = env.as_contract(&contract_id, || get_storage_bytes(&env));
+    assert_eq!(bytes_after_third, bytes_after_second);
+    let unchanged_period: Option<u64> =
+        env.as_contract(&contract_id, || env.storage().persistent().get(&latest_key));
+    assert_eq!(unchanged_period, Some(10));
+}
+
+
