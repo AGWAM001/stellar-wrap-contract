@@ -583,6 +583,12 @@ impl StellarWrapContract {
         bridge::bridge_wrap_out(e, user, destination_chain, recipient_address, period)
     }
 
+    /// Relayer-authorized refund for an outbound bridge request rejected by
+    /// the destination chain. Restores the locked wrap to `Active`.
+    pub fn bridge_wrap_refund(e: Env, outbound_nonce: u64) {
+        bridge::bridge_wrap_refund(e, outbound_nonce);
+    }
+
     /// Fulfill an inbound cross-chain wrap bridge transfer from external chain.
     pub fn bridge_wrap_in(
         e: Env,

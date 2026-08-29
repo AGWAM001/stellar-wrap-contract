@@ -1,6 +1,6 @@
 use soroban_sdk::{panic_with_error, symbol_short, Address, Env};
 
-use crate::{ContractError, DataKey};
+use crate::{ContractError, DataKey, WrapRecord, WrapState};
 
 /// Burns (permanently deletes) a wrap record owned by the caller.
 ///
@@ -35,6 +35,11 @@ pub(crate) fn burn_wrap(e: Env, user: Address, period: u64) {
     let wrap_key = DataKey::Wrap(user.clone(), period);
     if !e.storage().persistent().has(&wrap_key) {
         panic_with_error!(e, ContractError::WrapNotFound);
+    }
+
+    let record: WrapRecord = e.storage().persistent().get(&wrap_key).unwrap();
+    if record.fsm.state == WrapState::Bridged {
+        panic_with_error!(e, ContractError::InvalidStateTransition);
     }
 
     // 3. Delete the wrap record from storage
