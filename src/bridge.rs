@@ -7,15 +7,6 @@ use crate::{storage_accounting, ContractError, DataKey};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
 
-fn validate_period(e: &Env, period: u64) {
-    let year = period / 100;
-    let month = period % 100;
-
-    if !(2024..=2100).contains(&year) || !(1..=12).contains(&month) {
-        panic_with_error!(e, ContractError::InvalidPeriod);
-    }
-}
-
 /// Set the bridge relayer address. Requires admin authorization.
 pub(crate) fn set_bridge_relayer(e: &Env, relayer: Address) {
     let admin = crate::admin::read_admin(e);
@@ -58,6 +49,7 @@ pub(crate) fn is_chain_supported(e: &Env, chain_id: u32) -> bool {
 
 /// Initiate an outbound cross-chain token/wrap bridge transfer.
 /// User locks/bridges their wrap record to a destination chain.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn bridge_wrap_out(
     e: Env,
     user: Address,
@@ -172,6 +164,7 @@ pub(crate) fn bridge_wrap_refund(e: Env, outbound_nonce: u64) {
 /// An opted-out recipient rejects the message without creating or updating any
 /// wrap records. The inbound nonce is still consumed and a `br_in_rej` event
 /// is emitted so the relayer does not retry the rejected message indefinitely.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn bridge_wrap_in(
     e: Env,
     source_chain: u32,
@@ -202,7 +195,7 @@ pub(crate) fn bridge_wrap_in(
         panic_with_error!(e, ContractError::NonceAlreadyProcessed);
     }
 
-    validate_period(&e, period);
+    crate::mint::validate_period(&e, period);
 
     e.storage().persistent().set(&processed_key, &true);
     e.storage()
@@ -264,21 +257,7 @@ pub(crate) fn bridge_wrap_in(
             );
         }
 
-        let latest_key = DataKey::LatestPeriod(recipient.clone());
-        let current_latest: u64 = e.storage().persistent().get(&latest_key).unwrap_or(0);
-        if period > current_latest {
-            let was_missing = current_latest == 0;
-            e.storage().persistent().set(&latest_key, &period);
-            e.storage()
-                .persistent()
-                .extend_ttl(&latest_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
-            if was_missing {
-                storage_accounting::add_storage_bytes(
-                    &e,
-                    storage_accounting::estimate_latest_bytes_new(),
-                );
-            }
-        }
+        crate::mint::update_latest_period(&e, &recipient, period);
 
         let user_periods_key = DataKey::UserPeriods(recipient.clone());
         let mut periods: soroban_sdk::Vec<u64> = e
@@ -298,6 +277,23 @@ pub(crate) fn bridge_wrap_in(
                 &e,
                 storage_accounting::estimate_userperiods_bytes_new(),
             );
+        }
+
+        let wrap_periods_key = DataKey::WrapPeriods(recipient.clone());
+        let mut wrap_periods: soroban_sdk::Vec<u64> = e
+            .storage()
+            .persistent()
+            .get(&wrap_periods_key)
+            .unwrap_or(soroban_sdk::Vec::new(&e));
+
+        if !wrap_periods.contains(period) {
+            wrap_periods.push_back(period);
+            e.storage()
+                .persistent()
+                .set(&wrap_periods_key, &wrap_periods);
+            e.storage()
+                .persistent()
+                .extend_ttl(&wrap_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
         }
     } else {
         let mut existing_record: WrapRecord = e.storage().persistent().get(&wrap_key).unwrap();
