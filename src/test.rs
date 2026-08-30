@@ -2565,6 +2565,45 @@ fn test_get_latest_wrap_multiple_wraps() {
     assert_eq!(client.balance_of(&user), 3);
 }
 
+/// Issue #479 — `get_wrap` must return `None` for a user that has never minted.
+///
+/// `get_wrap` is a thin read over persistent storage: it returns
+/// `None` when no `Wrap(user, period)` key is present.  A freshly
+/// generated address has no storage entries at all, so every
+/// `(user, period)` combination must return `None`.
+#[test]
+fn test_get_wrap_nonexistent_user_returns_none() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    // A user that has never interacted with the contract at all.
+    let unknown_user = Address::generate(&env);
+
+    // Any (user, period) pair for this user must yield None.
+    assert!(
+        client.get_wrap(&unknown_user, &202401).is_none(),
+        "get_wrap must return None for a user that has never minted (period 202401)"
+    );
+    assert!(
+        client.get_wrap(&unknown_user, &202501).is_none(),
+        "get_wrap must return None for a user that has never minted (period 202501)"
+    );
+    assert!(
+        client.get_wrap(&unknown_user, &210012).is_none(),
+        "get_wrap must return None for a user that has never minted (period 210012)"
+    );
+
+    // balance_of must also be zero — no wrap records means no count entry.
+    assert_eq!(
+        client.balance_of(&unknown_user),
+        0,
+        "balance_of must be zero for a user that has never minted"
+    );
 #[test]
 fn test_storage_md_documents_every_datakey_variant() {
     let storage_md = include_str!("../STORAGE.md");
