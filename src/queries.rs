@@ -23,10 +23,9 @@ pub(crate) fn get_last_updated(e: Env, user: Address) -> Option<u64> {
 /// and casts it to `i128` to satisfy the standard token interface return signature.
 /// The return value represents a count of discrete wrap records, not a fungible token balance.
 pub(crate) fn balance_of(e: Env, user: Address) -> i128 {
-    let count_key = DataKey::WrapCount(user);
     e.storage()
         .persistent()
-        .get::<_, u32>(&count_key)
+        .get::<_, u32>(&DataKey::WrapCount(user))
         .unwrap_or(0) as i128
 }
 
