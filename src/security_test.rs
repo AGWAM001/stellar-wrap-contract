@@ -1157,3 +1157,64 @@ fn test_new_admin_can_propose_further_transfers() {
     assert_eq!(client.get_admin().unwrap(), admin_3);
     assert!(client.get_pending_admin().is_none());
 }
+
+/// Test 23: Tampered data_hash Invalidates Admin Signature
+///
+/// The admin signs a payload that commits to `data_hash_a`. If the caller
+/// substitutes `data_hash_b` (a different hash) when invoking `mint_wrap`,
+/// the contract must reject the call with `InvalidSignature` (error #5)
+/// because the signed payload no longer matches what is being submitted.
+/// The user's wrap record must remain absent after the failed attempt.
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_tampered_data_hash_invalidates_admin_signature() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("architect");
+    let period = 202512u64; // December 2025
+
+    // Hash A: what the admin signs
+    let data_hash_a = BytesN::from_array(&env, &[42u8; 32]);
+    // Hash B: what the attacker submits instead
+    let data_hash_b = BytesN::from_array(&env, &[99u8; 32]);
+
+    // Admin signs over hash A
+    let signature = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        period,
+        &archetype,
+        &data_hash_a,
+        CURRENT_PAYLOAD_VERSION,
+    );
+
+    // Attacker submits hash B together with the signature that was made for hash A.
+    // The contract must detect the mismatch and panic with InvalidSignature (#5).
+    client.mint_wrap(
+        &user,
+        &period,
+        &archetype,
+        &data_hash_b,         // tampered: different from what was signed
+        &CURRENT_PAYLOAD_VERSION,
+        &signature,
+    );
+
+    // Execution must not reach this point.
+    // If it did, the user would have a wrap — which is the vulnerability being guarded against.
+    assert!(
+        client.get_wrap(&user, &period).is_none(),
+        "User must not have a wrap after a signature verification failure"
+    );
+}
