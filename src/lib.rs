@@ -1,9 +1,14 @@
 //! # Stellar Wrap Registry
 //!
-//! A Soroban smart contract on Stellar that records timestamped data-wrap
 //! commitments on-chain. Each wrap binds a user address, a period
-//! (`YYYYMM`), an archetype label, and a SHA-256 data hash into an
-//! immutable record.
+//! (represented as a `u64` in `YYYYMM` format), an archetype label, and a SHA-256
+//! data hash into an immutable record.
+//!
+//! ### Period Format Contract
+//! - **Type**: Unsigned 64-bit integer (`u64`).
+//! - **Canonical Format**: `YYYYMM` (e.g. `202512` for December 2025).
+//! - **Validation**: Enforced on-chain to have year between `2024` and `2100`, and month between `01` and `12`.
+//! - **Non-Monthly Periods**: Not natively supported by the validation rules. Integrations must map non-monthly periods (weekly, daily, quarterly) to a valid `YYYYMM` value.
 //!
 //! ## Security
 //!
