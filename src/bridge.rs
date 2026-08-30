@@ -162,7 +162,11 @@ pub(crate) fn bridge_wrap_refund(e: Env, outbound_nonce: u64) {
         .extend_ttl(&wrap_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 
     e.events().publish(
-        (symbol_short!("br_refund"), request.sender.clone(), request.period),
+        (
+            symbol_short!("br_refund"),
+            request.sender.clone(),
+            request.period,
+        ),
         outbound_nonce,
     );
 }

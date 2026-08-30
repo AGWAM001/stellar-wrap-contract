@@ -222,10 +222,16 @@ fn test_bridged_wrap_blocks_escape_routes_and_supports_refund() {
         client.bridge_wrap_out(&user, &destination_chain, &destination, &period);
     }));
     assert!(second_bridge_result.is_err());
-    assert_eq!(client.get_wrap(&user, &period).unwrap().fsm.state, WrapState::Bridged);
+    assert_eq!(
+        client.get_wrap(&user, &period).unwrap().fsm.state,
+        WrapState::Bridged
+    );
 
     client.bridge_wrap_refund(&outbound_nonce);
-    assert_eq!(client.get_wrap(&user, &period).unwrap().fsm.state, WrapState::Active);
+    assert_eq!(
+        client.get_wrap(&user, &period).unwrap().fsm.state,
+        WrapState::Active
+    );
 }
 
 #[test]
@@ -369,7 +375,10 @@ fn test_bridge_wrap_in_then_mint_succeeds() {
         &signature,
     );
 
-    assert_eq!(client.get_wrap(&recipient, &mint_period).unwrap().period, mint_period);
+    assert_eq!(
+        client.get_wrap(&recipient, &mint_period).unwrap().period,
+        mint_period
+    );
 }
 
 #[test]
@@ -400,7 +409,10 @@ fn test_bridge_wrap_in_then_transfer_succeeds() {
     client.transfer_wrap(&recipient, &destination, &period);
 
     assert!(client.get_wrap(&recipient, &period).is_none());
-    assert_eq!(client.get_wrap(&destination, &period).unwrap().period, period);
+    assert_eq!(
+        client.get_wrap(&destination, &period).unwrap().period,
+        period
+    );
 }
 
 #[test]
@@ -483,7 +495,10 @@ fn test_bridge_wrap_in_rejects_terminal_states() {
         }));
 
         assert!(result.is_err());
-        assert_eq!(client.get_wrap(&recipient, &period).unwrap().fsm.state, state);
+        assert_eq!(
+            client.get_wrap(&recipient, &period).unwrap().fsm.state,
+            state
+        );
     }
 }
 
@@ -637,7 +652,14 @@ fn test_mint_wrap_and_bridge_wrap_in_period_validation_parity() {
 
         let nonce = period; // unique per iteration
         let bridge_result = catch_unwind(AssertUnwindSafe(|| {
-            client.bridge_wrap_in(&chain_id, &nonce, &bridge_user, &period, &archetype, &data_hash);
+            client.bridge_wrap_in(
+                &chain_id,
+                &nonce,
+                &bridge_user,
+                &period,
+                &archetype,
+                &data_hash,
+            );
         }));
 
         if is_valid {
@@ -726,12 +748,7 @@ fn test_transfer_wrap_of_bridged_record_succeeds() {
     let data_hash = BytesN::from_array(&env, &[88u8; 32]);
 
     client.bridge_wrap_in(
-        &chain_id,
-        &101u64,
-        &from_user,
-        &period,
-        &archetype,
-        &data_hash,
+        &chain_id, &101u64, &from_user, &period, &archetype, &data_hash,
     );
 
     assert_eq!(client.balance_of(&from_user), 1);
@@ -742,7 +759,9 @@ fn test_transfer_wrap_of_bridged_record_succeeds() {
 
     assert_eq!(client.balance_of(&from_user), 0);
     assert_eq!(client.balance_of(&to_user), 1);
-    let wrap = client.get_wrap(&to_user, &period).expect("transferred wrap exists");
+    let wrap = client
+        .get_wrap(&to_user, &period)
+        .expect("transferred wrap exists");
     assert_eq!(wrap.fsm.state, WrapState::Active);
 }
 
@@ -765,12 +784,7 @@ fn test_bridge_wrap_in_index_invariants() {
     for (idx, &period) in periods.iter().enumerate() {
         let nonce = (idx + 1) as u64;
         client.bridge_wrap_in(
-            &chain_id,
-            &nonce,
-            &recipient,
-            &period,
-            &archetype,
-            &data_hash,
+            &chain_id, &nonce, &recipient, &period, &archetype, &data_hash,
         );
 
         // Verify invariant: WrapCount == WrapPeriods.len() == UserPeriods.len()
@@ -813,12 +827,7 @@ fn test_bridge_wrap_in_existing_period_updates_rather_than_duplicating() {
 
     // First bridge in: creates new wrap record
     client.bridge_wrap_in(
-        &chain_id,
-        &1u64,
-        &recipient,
-        &period,
-        &archetype,
-        &data_hash,
+        &chain_id, &1u64, &recipient, &period, &archetype, &data_hash,
     );
 
     // Bridge wrap out: sets state to Pending
@@ -830,12 +839,7 @@ fn test_bridge_wrap_in_existing_period_updates_rather_than_duplicating() {
 
     // Second bridge in (e.g. returned/re-bridged from another chain): updates existing record
     client.bridge_wrap_in(
-        &chain_id,
-        &2u64,
-        &recipient,
-        &period,
-        &archetype,
-        &data_hash,
+        &chain_id, &2u64, &recipient, &period, &archetype, &data_hash,
     );
 
     let wrap_active = client.get_wrap(&recipient, &period).expect("wrap exists");
@@ -862,4 +866,3 @@ fn test_bridge_wrap_in_existing_period_updates_rather_than_duplicating() {
     assert_eq!(count, wrap_periods_len);
     assert_eq!(wrap_periods_len, user_periods_len);
 }
-

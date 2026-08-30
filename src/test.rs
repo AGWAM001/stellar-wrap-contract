@@ -7,10 +7,7 @@ use crate::test_utils::{decode_events, sign_payload, sign_payload_versioned};
 use ed25519_dalek::SigningKey;
 use soroban_sdk::{
     symbol_short,
-    testutils::{
-        budget::ContractCostType,
-        {Address as _, Events},
-    },
+    testutils::{budget::ContractCostType, Address as _, Events, Ledger},
     Address, Bytes, BytesN, Env, IntoVal, String, Symbol, TryIntoVal,
 };
 use std::vec::Vec;
@@ -275,7 +272,7 @@ fn test_initialize_twice_fails() {
 #[should_panic]
 fn test_initialize_without_admin_auth_fails() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 32]);
@@ -287,7 +284,7 @@ fn test_initialize_without_admin_auth_fails() {
 #[should_panic(expected = "Error(Contract, #26)")]
 fn test_defeated_admin_proposal_is_persisted() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let proposer = Address::generate(&env);
@@ -317,7 +314,7 @@ fn test_defeated_admin_proposal_is_persisted() {
 #[test]
 fn test_passing_admin_proposal_is_timelocked() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let proposer = Address::generate(&env);
@@ -351,7 +348,7 @@ fn test_passing_admin_proposal_is_timelocked() {
 #[test]
 fn test_whitelist_root_requires_timelock_after_enable() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let initial_root = BytesN::from_array(&env, &[1u8; 32]);
@@ -2037,8 +2034,8 @@ mod verify_data_unit_tests {
         let admin = Address::generate(&env);
         let user = Address::generate(&env);
 
-        client.initialize(&admin, &admin_pubkey);
         env.mock_all_auths();
+        client.initialize(&admin, &admin_pubkey);
 
         (env, contract_id, client, signing_key, admin, user)
     }
@@ -2433,7 +2430,10 @@ mod verify_data_unit_tests {
         let result = client.verify_data(&user, &period, &large_payload);
 
         let cpu_after = env.cost_estimate().budget().cpu_instruction_cost();
-        let sha_tracker = env.cost_estimate().budget().tracker(ContractCostType::ComputeSha256Hash);
+        let sha_tracker = env
+            .cost_estimate()
+            .budget()
+            .tracker(ContractCostType::ComputeSha256Hash);
 
         assert!(
             result,
@@ -2678,5 +2678,3 @@ fn test_update_latest_period_option_storage_accounting() {
         env.as_contract(&contract_id, || env.storage().persistent().get(&latest_key));
     assert_eq!(unchanged_period, Some(10));
 }
-
-
