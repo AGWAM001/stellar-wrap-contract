@@ -32,12 +32,15 @@ Each wrap record stores:
 - `timestamp: u64`
 - `data_hash: BytesN<32>`
 - `archetype: Symbol`
-- `period: u64`
+- `period: u64` (the canonical period format, represented as an unsigned 64-bit integer)
 
-`period` is encoded as `YYYYMM` and validated on mint:
+`period` is encoded as a `u64` in `YYYYMM` format (e.g. `202401` for January 2024) and validated on mint:
 
-- year must be between `2024` and `2100`
-- month must be between `01` and `12`
+- Year (`period / 100`) must be between `2024` and `2100`.
+- Month (`period % 100`) must be between `01` and `12`.
+
+#### Non-Monthly Periods
+On-chain validation strictly enforces the `YYYYMM` format. Therefore, non-monthly periods (such as weekly, daily, or quarterly wraps) are not natively supported by the contract validation logic. Integrations requiring non-monthly periods must map their descriptors to a canonical `YYYYMM` `u64` value (e.g., mapping Q1 2025 to `202503` or a specific week to the month in which it ends) before initiating a mint.
 
 ## SBT compatibility
 
