@@ -787,6 +787,8 @@ mod last_updated_test;
 #[cfg(test)]
 mod oracle_test;
 #[cfg(test)]
+mod prop_test;
+#[cfg(test)]
 mod security_test;
 #[cfg(test)]
 mod stake_test;
