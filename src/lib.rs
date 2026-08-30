@@ -439,6 +439,10 @@ impl StellarWrapContract {
         burn::burn_wrap(e, user, period);
     }
 
+    /// Returns the total number of wraps that have been revoked globally.
+    ///
+    /// Note: This counter only tracks revocations (via `revoke_wrap`).
+    /// It is unaffected by wrap burns (via `burn_wrap`).
     pub fn total_revoked(e: Env) -> u64 {
         queries::total_revoked(e)
     }
@@ -798,3 +802,5 @@ mod test_utils;
 mod test_vectors;
 #[cfg(test)]
 mod transfer_test;
+#[cfg(test)]
+mod merkle_test;
