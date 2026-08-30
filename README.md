@@ -41,11 +41,38 @@ Each wrap record stores:
 
 ## SBT compatibility
 
-Wrap records are implemented as non-transferable (soulbound) entries. The contract intentionally omits `transfer`, `transfer_from`, `approve`, and `allowance` methods. As a result:
+Wrap records are implemented as non-transferable (soulbound) entries. The contract intentionally omits standard `transfer`, `transfer_from`, `approve`, and `allowance` methods for fungible tokens. As a result:
 
 - `balance_of(user)` returns the number of wrap records minted for `user`, not a tradable token balance.
-- records cannot be transferred between addresses by users.
-- any future removal or replacement of a wrap record would require an admin-controlled operation, not a user-initiated transfer.
+- records cannot be transferred between addresses as arbitrary token quantities.
+- wrap record movement is scoped to specific periods via `transfer_wrap(from, to, period)`.
+
+## Token interface compatibility
+
+This contract functions as a **soulbound registry**, not a conventional SEP-41 fungible token. While it exposes `token::TokenInterface` for broad compatibility with Soroban tooling, it intentionally implements only a deliberate subset of token-interface functionality.
+
+The presence of methods such as `name`, `symbol`, `decimals`, and `balance_of` does **not** mean the contract is a fully usable fungible token. Wallets, block explorers, and other integrators must not interpret `balance_of` as a fungible token balance or present standard token transfer UI. Furthermore, `transfer_wrap` has registry-specific semantics (moving a specific wrap record identified by `period`) and is not equivalent to a standard fungible-token `transfer`.
+
+### Implemented
+
+| Function | Status / Semantics |
+| --- | --- |
+| `name` | Implemented; identifies the wrap registry display name. |
+| `symbol` | Implemented; identifies the wrap registry ticker symbol. |
+| `decimals` | Implemented; intentionally returns `0` because wrap records are discrete, indivisible entries with no fractional units. |
+| `balance_of` | Implemented for interface compatibility; returns the count of active wrap records associated with an address (a `u32` wrap count cast to `i128`), **not** a fungible token amount. |
+
+### Deliberately omitted
+
+| Operation | Status | Rationale |
+| --- | --- | --- |
+| `transfer` | Omitted | The contract does not hold or move arbitrary fungible token amounts. Transferring wrap records requires specifying a target period (`YYYYMM`) via `transfer_wrap`. |
+| `approve` | Omitted | Delegated spending allowances do not apply as there are no fungible token units to approve for spending. |
+| `allowance` | Omitted | No spending approvals exist to query. |
+| `transfer_from` | Omitted | Delegated third-party transfers of fungible token amounts are not supported. |
+| `burn` | Omitted | Standard fungible token supply burning does not apply. Deleting individual wrap records is done via `burn_wrap(user, period)`. |
+| `burn_from` | Omitted | Delegated burning of token supply is not supported. |
+| `mint` | Omitted | Standard fungible token supply minting does not apply. Registering wrap records is performed via `mint_wrap` with period-specific validation and signed payloads. |
 ### `ContractHealth`
 
 Returned by `health()`, reports:
