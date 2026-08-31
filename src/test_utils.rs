@@ -6,7 +6,7 @@ use soroban_sdk::testutils::Events;
 use soroban_sdk::xdr::{ContractEventBody, ScVal};
 use soroban_sdk::{Address, BytesN, Env, Symbol, TryIntoVal, Val};
 
-use crate::signature::construct_mint_payload;
+use crate::signature::{construct_batch_mint_payload, construct_mint_payload};
 
 /// Signs the same payload layout the contract rebuilds in `mint::mint_wrap`.
 #[allow(dead_code)]
@@ -43,11 +43,28 @@ pub(crate) fn sign_payload_versioned(
         payload_version,
     );
 
-    let mut out = [0u8; 512];
-    let len = payload.len() as usize;
-    payload.copy_into_slice(&mut out[..len]);
+    let mut out = vec![0u8; len];
+    payload.copy_into_slice(&mut out);
 
-    let signature = signer.sign(&out[..len]);
+    let signature = signer.sign(&out);
+    BytesN::from_array(env, &signature.to_bytes())
+}
+
+/// Signs the aggregated batch payload that `verify_batch_aggregated_signature` verifies.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sign_batch_payload(
+    env: &Env,
+    signer: &SigningKey,
+    contract: &Address,
+    items: &soroban_sdk::Vec<crate::storage_types::BatchWrapItem>,
+    payload_version: u32,
+) -> BytesN<64> {
+    let payload = construct_batch_mint_payload(env, contract, items, payload_version);
+    let len = payload.len() as usize;
+    let mut out = vec![0u8; len];
+    payload.copy_into_slice(&mut out);
+    let signature = signer.sign(&out);
     BytesN::from_array(env, &signature.to_bytes())
 }
 

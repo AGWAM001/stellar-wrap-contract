@@ -52,6 +52,13 @@ pub fn construct_mint_payload(
     payload
 }
 
+/// Maximum payload size accepted by `verify_ed25519`.
+///
+/// A batch of `MAX_BATCH_SIZE` items produces a payload well under this limit
+/// (~16 KiB headroom). Payloads that exceed this bound are rejected with
+/// [`ContractError::InvalidSignature`] rather than panicking.
+pub const MAX_VERIFY_PAYLOAD_BYTES: usize = 32_768; // 32 KiB
+
 /// Verifies an Ed25519 signature in-guest, mapping every failure mode to
 /// [`ContractError::InvalidSignature`].
 ///
@@ -62,21 +69,32 @@ pub fn construct_mint_payload(
 /// pinned `ed25519-dalek` version (3.0.0, `verify_strict`) that
 /// `soroban-env-host` uses reproduces identical acceptance semantics while
 /// keeping the failure inside the contract's error domain.
+///
+/// # Panics
+///
+/// Never panics. Payloads larger than [`MAX_VERIFY_PAYLOAD_BYTES`] are
+/// rejected with [`ContractError::InvalidSignature`].
 fn verify_ed25519(
     public_key: &BytesN<32>,
     message: &Bytes,
     signature: &BytesN<64>,
 ) -> Result<(), ContractError> {
+    let len = message.len() as usize;
+    if len > MAX_VERIFY_PAYLOAD_BYTES {
+        return Err(ContractError::InvalidSignature);
+    }
+
     let verifying_key = VerifyingKey::from_bytes(&public_key.to_array())
         .map_err(|_| ContractError::InvalidSignature)?;
     let sig = Signature::from_bytes(&signature.to_array());
 
-    let mut msg = [0u8; 512];
-    let len = message.len() as usize;
-    message.copy_into_slice(&mut msg[..len]);
+    // Heap-allocate a buffer sized to the actual message length so we never
+    // index out of bounds regardless of payload size.
+    let mut msg = vec![0u8; len];
+    message.copy_into_slice(&mut msg);
 
     verifying_key
-        .verify_strict(&msg[..len], &sig)
+        .verify_strict(&msg, &sig)
         .map_err(|_| ContractError::InvalidSignature)
 }
 
@@ -250,11 +268,11 @@ mod tests {
             payload_version,
         );
 
-        let mut out = [0u8; 512];
         let len = payload.len() as usize;
-        payload.copy_into_slice(&mut out[..len]);
+        let mut out = vec![0u8; len];
+        payload.copy_into_slice(&mut out);
 
-        let signature = signer.sign(&out[..len]);
+        let signature = signer.sign(&out);
         BytesN::from_array(env, &signature.to_bytes())
     }
 
@@ -456,11 +474,11 @@ mod tests {
         let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
 
         let payload = construct_batch_mint_payload(&env, &contract_id, &items, 1);
-        let mut out = [0u8; 512];
         let len = payload.len() as usize;
-        payload.copy_into_slice(&mut out[..len]);
+        let mut out = vec![0u8; len];
+        payload.copy_into_slice(&mut out);
 
-        let agg_sig_bytes = signing_key.sign(&out[..len]);
+        let agg_sig_bytes = signing_key.sign(&out);
         let agg_sig = BytesN::from_array(&env, &agg_sig_bytes.to_bytes());
 
         assert!(verify_batch_aggregated_signature(
@@ -472,5 +490,107 @@ mod tests {
             &agg_sig,
         )
         .is_ok());
+    }
+
+    /// Regression: batch of MAX_BATCH_SIZE items must not panic in verify_ed25519.
+    /// The aggregated payload for 100 items is ~12-15 KiB, far beyond the
+    /// old 512-byte stack buffer.
+    #[test]
+    fn test_verify_batch_max_size_does_not_panic() {
+        let env = Env::default();
+        let contract_id = env.register(StellarWrapContract, ());
+        let signing_key = SigningKey::from_bytes(&[77u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let data_hash = BytesN::from_array(&env, &[3u8; 32]);
+        let archetype = symbol_short!("arch");
+
+        let mut items = soroban_sdk::Vec::new(&env);
+        for i in 0..crate::mint::MAX_BATCH_SIZE {
+            let user = Address::generate(&env);
+            let period = 202601u64 + (i as u64 % 12);
+            items.push_back(crate::storage_types::BatchWrapItem {
+                user,
+                period,
+                archetype: archetype.clone(),
+                data_hash: data_hash.clone(),
+                payload_version: 1,
+                signature: BytesN::from_array(&env, &[0u8; 64]),
+            });
+        }
+
+        let payload = construct_batch_mint_payload(&env, &contract_id, &items, 1);
+        let len = payload.len() as usize;
+        // Confirm the payload is well above the old 512-byte limit.
+        assert!(len > 512, "batch payload should exceed old buffer: {len} bytes");
+
+        let mut out = vec![0u8; len];
+        payload.copy_into_slice(&mut out);
+        let agg_sig = BytesN::from_array(&env, &signing_key.sign(&out).to_bytes());
+
+        // Must succeed — no panic, no OOB index.
+        assert!(verify_batch_aggregated_signature(
+            &env,
+            &admin_pubkey,
+            &contract_id,
+            &items,
+            1,
+            &agg_sig,
+        )
+        .is_ok());
+    }
+
+    /// Regression: a single-item mint with a 32-character archetype symbol
+    /// (maximum Symbol length) must not panic in verify_ed25519.
+    #[test]
+    fn test_verify_mint_max_archetype_does_not_panic() {
+        let env = Env::default();
+        let contract_id = env.register(StellarWrapContract, ());
+        let user = Address::generate(&env);
+        // 32-character symbol — the maximum allowed by the Soroban Symbol type.
+        let archetype = Symbol::new(&env, "abcdefghijklmnopqrstuvwxyzabcdef");
+        let data_hash = BytesN::from_array(&env, &[5u8; 32]);
+        let period = 202601u64;
+
+        let signing_key = SigningKey::from_bytes(&[88u8; 32]);
+        let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let signature = sign_payload(
+            &env,
+            &signing_key,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+            1,
+        );
+
+        assert!(verify_mint_signature(
+            &env,
+            &admin_pubkey,
+            &contract_id,
+            &user,
+            period,
+            &archetype,
+            &data_hash,
+            1,
+            &signature,
+        )
+        .is_ok());
+    }
+
+    /// Regression: a payload exceeding MAX_VERIFY_PAYLOAD_BYTES must return
+    /// InvalidSignature instead of panicking or indexing out of bounds.
+    #[test]
+    fn test_verify_ed25519_rejects_oversized_payload() {
+        let env = Env::default();
+        let signing_key = SigningKey::from_bytes(&[99u8; 32]);
+        let pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+        let dummy_sig = BytesN::from_array(&env, &[0u8; 64]);
+
+        // Build a Bytes payload larger than MAX_VERIFY_PAYLOAD_BYTES.
+        let oversized = Bytes::from_slice(&env, &vec![0u8; MAX_VERIFY_PAYLOAD_BYTES + 1]);
+
+        let result = verify_ed25519(&pubkey, &oversized, &dummy_sig);
+        assert_eq!(result, Err(ContractError::InvalidSignature));
     }
 }

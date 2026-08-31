@@ -1,7 +1,9 @@
-use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
+use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env, Vec};
 
 use crate::storage_accounting;
 use crate::{ContractError, DataKey};
+
+const TTL_ONE_YEAR: u32 = 17_280 * 365;
 
 /// Revokes an existing wrap record for the given user and period.
 ///
@@ -42,33 +44,91 @@ pub(crate) fn revoke_wrap(e: Env, user: Address, period: u64, reason_hash: Bytes
     e.storage().persistent().remove(&wrap_key);
     storage_accounting::sub_storage_bytes(&e, storage_accounting::estimate_wrap_bytes_new());
 
-    // Decrement the user's wrap count
-    let count_key = DataKey::WrapCount(user.clone());
-    let current_count: u32 = e.storage().persistent().get(&count_key).unwrap_or(0);
+    // Update WrapPeriods, WrapCount, and LatestPeriod atomically — mirrors
+    // burn_wrap so the invariant WrapCount == WrapPeriods.len() always holds.
+    let wrap_periods_key = DataKey::WrapPeriods(user.clone());
+    let wrap_periods: Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&wrap_periods_key)
+        .unwrap_or_else(|| Vec::new(&e));
 
-    if current_count > 0 {
-        let next_count = current_count - 1;
-        e.storage().persistent().set(&count_key, &next_count);
-        // If count became zero, we consider removing the count entry overhead
-        if next_count == 0 {
-            storage_accounting::sub_storage_bytes(
-                &e,
-                storage_accounting::estimate_wrapcount_bytes_new(),
-            );
-            // Optionally remove the key entirely (keep it set to 0 for now to match existing behavior)
+    let mut remaining_wrap_periods: Vec<u64> = Vec::new(&e);
+    for p in wrap_periods.iter() {
+        if p != period {
+            remaining_wrap_periods.push_back(p);
         }
     }
 
-    // Clear latest period if we just revoked it
-    let latest_key = DataKey::LatestPeriod(user.clone());
-    let current_latest: Option<u64> = e.storage().persistent().get(&latest_key);
-    if current_latest == Some(period) {
-        e.storage().persistent().remove(&latest_key);
+    let count_key = DataKey::WrapCount(user.clone());
+    let new_count = remaining_wrap_periods.len();
+
+    if remaining_wrap_periods.is_empty() {
+        e.storage().persistent().remove(&wrap_periods_key);
+        e.storage().persistent().remove(&count_key);
+        e.storage()
+            .persistent()
+            .remove(&DataKey::LatestPeriod(user.clone()));
+        storage_accounting::sub_storage_bytes(
+            &e,
+            storage_accounting::estimate_wrapcount_bytes_new(),
+        );
+    } else {
+        e.storage()
+            .persistent()
+            .set(&wrap_periods_key, &remaining_wrap_periods);
+        e.storage()
+            .persistent()
+            .extend_ttl(&wrap_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+        e.storage().persistent().set(&count_key, &new_count);
+        e.storage()
+            .persistent()
+            .extend_ttl(&count_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+
+        // Recompute LatestPeriod from remaining periods
+        let mut latest: u64 = 0;
+        for p in remaining_wrap_periods.iter() {
+            if p > latest {
+                latest = p;
+            }
+        }
+        let latest_key = DataKey::LatestPeriod(user.clone());
+        e.storage().persistent().set(&latest_key, &latest);
+        e.storage()
+            .persistent()
+            .extend_ttl(&latest_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+    }
+
+    // Keep UserPeriods in sync (legacy index used by get_wraps / get_latest_wrap)
+    let user_periods_key = DataKey::UserPeriods(user.clone());
+    let user_periods: Vec<u64> = e
+        .storage()
+        .persistent()
+        .get(&user_periods_key)
+        .unwrap_or_else(|| Vec::new(&e));
+
+    let mut remaining_user_periods: Vec<u64> = Vec::new(&e);
+    for p in user_periods.iter() {
+        if p != period {
+            remaining_user_periods.push_back(p);
+        }
+    }
+
+    if remaining_user_periods.is_empty() {
+        e.storage().persistent().remove(&user_periods_key);
+    } else {
+        e.storage()
+            .persistent()
+            .set(&user_periods_key, &remaining_user_periods);
+        e.storage()
+            .persistent()
+            .extend_ttl(&user_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
     }
 
     let total_revoked_key = DataKey::TotalRevoked;
-    let current_total: u64 = e.storage().temporary().get(&total_revoked_key).unwrap_or(0);
-    let next_total = current_total + 1;
+    let current_total: u64 = e.storage().instance().get(&total_revoked_key).unwrap_or(0);
+    let next_total = current_total.checked_add(1).unwrap_or_else(|| panic_with_error!(&e, ContractError::ArithmeticOverflow));
     e.storage().instance().set(&total_revoked_key, &next_total);
 
     // Record the revocation timestamp in the user's last-updated marker.

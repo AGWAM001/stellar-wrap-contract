@@ -174,7 +174,7 @@ pub(crate) fn has_wrap(e: Env, user: Address, period: u64) -> bool {
 
 pub(crate) fn total_revoked(e: Env) -> u64 {
     e.storage()
-        .temporary()
+        .instance()
         .get::<_, u64>(&DataKey::TotalRevoked)
         .unwrap_or(0)
 }
