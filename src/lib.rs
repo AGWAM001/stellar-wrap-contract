@@ -1,9 +1,14 @@
 //! # Stellar Wrap Registry
 //!
-//! A Soroban smart contract on Stellar that records timestamped data-wrap
 //! commitments on-chain. Each wrap binds a user address, a period
-//! (`YYYYMM`), an archetype label, and a SHA-256 data hash into an
-//! immutable record.
+//! (represented as a `u64` in `YYYYMM` format), an archetype label, and a SHA-256
+//! data hash into an immutable record.
+//!
+//! ### Period Format Contract
+//! - **Type**: Unsigned 64-bit integer (`u64`).
+//! - **Canonical Format**: `YYYYMM` (e.g. `202512` for December 2025).
+//! - **Validation**: Enforced on-chain to have year between `2024` and `2100`, and month between `01` and `12`.
+//! - **Non-Monthly Periods**: Not natively supported by the validation rules. Integrations must map non-monthly periods (weekly, daily, quarterly) to a valid `YYYYMM` value.
 //!
 //! ## Security
 //!
@@ -439,6 +444,10 @@ impl StellarWrapContract {
         burn::burn_wrap(e, user, period);
     }
 
+    /// Returns the total number of wraps that have been revoked globally.
+    ///
+    /// Note: This counter only tracks revocations (via `revoke_wrap`).
+    /// It is unaffected by wrap burns (via `burn_wrap`).
     pub fn total_revoked(e: Env) -> u64 {
         queries::total_revoked(e)
     }
@@ -552,14 +561,14 @@ impl StellarWrapContract {
         timelock::operation_id(&e, &action)
     }
 
-    /// Admin: Set the cross-chain token bridge relayer address.
-    pub fn set_bridge_relayer(e: Env, relayer: Address) {
-        bridge::set_bridge_relayer(&e, relayer);
+    /// Admin: Set the cross-chain token bridge relayers for a given chain.
+    pub fn set_bridge_relayers(e: Env, chain_id: u32, relayers: soroban_sdk::Vec<BytesN<32>>, threshold: u32) {
+        bridge::set_bridge_relayers(&e, chain_id, relayers, threshold);
     }
 
-    /// Returns the configured cross-chain token bridge relayer address.
-    pub fn get_bridge_relayer(e: Env) -> Option<Address> {
-        bridge::get_bridge_relayer(&e)
+    /// Returns the configured cross-chain token bridge relayers for a given chain.
+    pub fn get_bridge_relayers(e: Env, chain_id: u32) -> Option<storage_types::BridgeRelayerSet> {
+        bridge::get_bridge_relayers(&e, chain_id)
     }
 
     /// Admin: Set enabled status for a destination/source cross-chain network chain ID.
@@ -598,6 +607,7 @@ impl StellarWrapContract {
         period: u64,
         archetype: Symbol,
         data_hash: BytesN<32>,
+        signatures: soroban_sdk::Vec<BytesN<64>>,
     ) {
         bridge::bridge_wrap_in(
             e,
@@ -607,6 +617,7 @@ impl StellarWrapContract {
             period,
             archetype,
             data_hash,
+            signatures,
         );
     }
 
@@ -787,6 +798,8 @@ mod last_updated_test;
 #[cfg(test)]
 mod oracle_test;
 #[cfg(test)]
+mod prop_test;
+#[cfg(test)]
 mod security_test;
 #[cfg(test)]
 mod stake_test;
@@ -800,3 +813,5 @@ mod test_utils;
 mod test_vectors;
 #[cfg(test)]
 mod transfer_test;
+#[cfg(test)]
+mod queries_test;

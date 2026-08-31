@@ -11,6 +11,7 @@ use soroban_sdk::{
         budget::ContractCostType,
         {Address as _, Events, Ledger},
     },
+    testutils::{budget::ContractCostType, Address as _, Events, Ledger},
     Address, Bytes, BytesN, Env, IntoVal, String, Symbol, TryIntoVal,
 };
 use std::vec::Vec;
@@ -165,6 +166,57 @@ fn test_revoke_emits_event_multi_user() {
 }
 
 #[test]
+fn test_revoke_non_latest_wrap_preserves_latest() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[16u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let older_hash = BytesN::from_array(&env, &[10u8; 32]);
+    let newer_hash = BytesN::from_array(&env, &[20u8; 32]);
+    let older_period = 202401u64;
+    let newer_period = 202402u64;
+
+    let older_sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        older_period,
+        &archetype,
+        &older_hash,
+    );
+    let newer_sig = sign_payload(
+        &env,
+        &signing_key,
+        &contract_id,
+        &user,
+        newer_period,
+        &archetype,
+        &newer_hash,
+    );
+
+    client.mint_wrap(&user, &older_period, &archetype, &older_hash, &1u32, &older_sig);
+    client.mint_wrap(&user, &newer_period, &archetype, &newer_hash, &1u32, &newer_sig);
+
+    let reason = BytesN::from_array(&env, &[0u8; 32]);
+    client.revoke_wrap(&user, &older_period, &reason);
+
+    assert!(client.get_wrap(&user, &older_period).is_none());
+    let latest = client.get_latest_wrap(&user).unwrap();
+    assert_eq!(latest.period, newer_period);
+    assert_eq!(latest.data_hash, newer_hash);
+}
+
+#[test]
 fn test_balance_of_and_count() {
     let env = Env::default();
     let contract_id = env.register(StellarWrapContract, ());
@@ -224,7 +276,7 @@ fn test_initialize_twice_fails() {
 #[should_panic]
 fn test_initialize_without_admin_auth_fails() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 32]);
@@ -236,7 +288,7 @@ fn test_initialize_without_admin_auth_fails() {
 #[should_panic(expected = "Error(Contract, #26)")]
 fn test_defeated_admin_proposal_is_persisted() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let proposer = Address::generate(&env);
@@ -266,7 +318,7 @@ fn test_defeated_admin_proposal_is_persisted() {
 #[test]
 fn test_passing_admin_proposal_is_timelocked() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let proposer = Address::generate(&env);
@@ -300,7 +352,7 @@ fn test_passing_admin_proposal_is_timelocked() {
 #[test]
 fn test_whitelist_root_requires_timelock_after_enable() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let initial_root = BytesN::from_array(&env, &[1u8; 32]);
@@ -353,7 +405,7 @@ fn test_initialize_after_rejected_zero_pubkey_succeeds() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.initialize(&admin, &BytesN::from_array(&env, &[0u8; 32]));
     }));
-    assert!(result.is_err(), "zero admin pubkey must be rejected");
+    assert!(result.is_err(), "Zero admin public key must be rejected.");
     assert!(!client.health().initialized);
 
     // A subsequent valid initialization still succeeds.
@@ -1679,6 +1731,114 @@ fn test_burn_wrap_multiple_users_independent() {
     assert!(client.get_wrap(&user_b, &period).is_some());
 }
 
+#[test]
+fn test_burn_then_transfer_remaining_wrap_succeeds() {
+    // Acceptance criterion: mint two, burn one, transfer the other successfully.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[41u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+    // Configure fee with amount=0 so transfer succeeds without token balance
+    client.set_transfer_fee(&token_id, &fee_recipient, &0i128);
+
+    let archetype = symbol_short!("arch");
+    let period1 = 202401u64;
+    let period2 = 202402u64;
+
+    let hash1 = BytesN::from_array(&env, &[41u8; 32]);
+    let hash2 = BytesN::from_array(&env, &[42u8; 32]);
+
+    let sig1 = sign_payload(&env, &signing_key, &contract_id, &user, period1, &archetype, &hash1);
+    let sig2 = sign_payload(&env, &signing_key, &contract_id, &user, period2, &archetype, &hash2);
+
+    client.mint_wrap(&user, &period1, &archetype, &hash1, &1u32, &sig1);
+    client.mint_wrap(&user, &period2, &archetype, &hash2, &1u32, &sig2);
+
+    // Burn period1 — WrapPeriods must be updated so transfer of period2 works
+    client.burn_wrap(&user, &period1);
+
+    assert!(client.get_wrap(&user, &period1).is_none());
+    assert_eq!(client.balance_of(&user), 1);
+
+    // Transfer period2 to recipient — must not panic with StorageInvariantViolation
+    client.transfer_wrap(&user, &recipient, &period2);
+
+    assert!(client.get_wrap(&user, &period2).is_none());
+    assert!(client.get_wrap(&recipient, &period2).is_some());
+    assert_eq!(client.balance_of(&user), 0);
+    assert_eq!(client.balance_of(&recipient), 1);
+}
+
+#[test]
+fn test_wrap_count_equals_wrap_periods_len_after_mint_burn_transfer() {
+    // Acceptance criterion: WrapCount == WrapPeriods.len() holds after any
+    // sequence of mint / burn / transfer.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[42u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let other = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+    // Configure fee with amount=0 so transfer succeeds without token balance
+    client.set_transfer_fee(&token_id, &fee_recipient, &0i128);
+
+    let archetype = symbol_short!("arch");
+    let periods: [u64; 4] = [202401, 202402, 202403, 202404];
+    let hashes: [[u8; 32]; 4] = [[10; 32], [20; 32], [30; 32], [40; 32]];
+
+    // Mint all four
+    for i in 0..4 {
+        let hash = BytesN::from_array(&env, &hashes[i]);
+        let sig = sign_payload(&env, &signing_key, &contract_id, &user, periods[i], &archetype, &hash);
+        client.mint_wrap(&user, &periods[i], &archetype, &hash, &1u32, &sig);
+    }
+    assert_eq!(client.balance_of(&user), 4);
+
+    // Burn 202401 → count 3
+    client.burn_wrap(&user, &periods[0]);
+    assert_eq!(client.balance_of(&user), 3);
+
+    // Burn 202402 → count 2
+    client.burn_wrap(&user, &periods[1]);
+    assert_eq!(client.balance_of(&user), 2);
+
+    // Transfer 202403 to other → user count 1, other count 1
+    client.transfer_wrap(&user, &other, &periods[2]);
+    assert_eq!(client.balance_of(&user), 1);
+    assert_eq!(client.balance_of(&other), 1);
+
+    // Transfer remaining 202404 — must not panic with StorageInvariantViolation
+    client.transfer_wrap(&user, &other, &periods[3]);
+    assert_eq!(client.balance_of(&user), 0);
+    assert_eq!(client.balance_of(&other), 2);
+}
+
 // ============================================================================
 // get_all_wraps_for_user tests
 // ============================================================================
@@ -1878,8 +2038,8 @@ mod verify_data_unit_tests {
         let admin = Address::generate(&env);
         let user = Address::generate(&env);
 
-        client.initialize(&admin, &admin_pubkey);
         env.mock_all_auths();
+        client.initialize(&admin, &admin_pubkey);
 
         (env, contract_id, client, signing_key, admin, user)
     }
@@ -2274,7 +2434,10 @@ mod verify_data_unit_tests {
         let result = client.verify_data(&user, &period, &large_payload);
 
         let cpu_after = env.cost_estimate().budget().cpu_instruction_cost();
-        let sha_tracker = env.cost_estimate().budget().tracker(ContractCostType::ComputeSha256Hash);
+        let sha_tracker = env
+            .cost_estimate()
+            .budget()
+            .tracker(ContractCostType::ComputeSha256Hash);
 
         assert!(
             result,
@@ -2406,6 +2569,45 @@ fn test_get_latest_wrap_multiple_wraps() {
     assert_eq!(client.balance_of(&user), 3);
 }
 
+/// Issue #479 — `get_wrap` must return `None` for a user that has never minted.
+///
+/// `get_wrap` is a thin read over persistent storage: it returns
+/// `None` when no `Wrap(user, period)` key is present.  A freshly
+/// generated address has no storage entries at all, so every
+/// `(user, period)` combination must return `None`.
+#[test]
+fn test_get_wrap_nonexistent_user_returns_none() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 32]);
+    client.initialize(&admin, &pubkey);
+
+    // A user that has never interacted with the contract at all.
+    let unknown_user = Address::generate(&env);
+
+    // Any (user, period) pair for this user must yield None.
+    assert!(
+        client.get_wrap(&unknown_user, &202401).is_none(),
+        "get_wrap must return None for a user that has never minted (period 202401)"
+    );
+    assert!(
+        client.get_wrap(&unknown_user, &202501).is_none(),
+        "get_wrap must return None for a user that has never minted (period 202501)"
+    );
+    assert!(
+        client.get_wrap(&unknown_user, &210012).is_none(),
+        "get_wrap must return None for a user that has never minted (period 210012)"
+    );
+
+    // balance_of must also be zero — no wrap records means no count entry.
+    assert_eq!(
+        client.balance_of(&unknown_user),
+        0,
+        "balance_of must be zero for a user that has never minted"
+    );
 #[test]
 fn test_storage_md_documents_every_datakey_variant() {
     let storage_md = include_str!("../STORAGE.md");
@@ -2520,4 +2722,385 @@ fn test_update_latest_period_option_storage_accounting() {
     assert_eq!(unchanged_period, Some(10));
 }
 
+// ── Batch opt-out regression tests (issue #631) ─────────────────────────────
 
+/// Helper: build and sign a `BatchWrapItem` with an individual signature.
+fn make_batch_item(
+    env: &Env,
+    signer: &SigningKey,
+    contract_id: &Address,
+    user: Address,
+    period: u64,
+    archetype: &Symbol,
+    data_hash: &BytesN<32>,
+) -> crate::storage_types::BatchWrapItem {
+    let sig = crate::test_utils::sign_payload(env, signer, contract_id, &user, period, archetype, data_hash);
+    crate::storage_types::BatchWrapItem {
+        user,
+        period,
+        archetype: archetype.clone(),
+        data_hash: data_hash.clone(),
+        payload_version: 1,
+        signature: sig,
+    }
+}
+
+/// Opt out user A, submit a batch [A, B] with individual signatures.
+/// The whole call must revert and B must have no wrap.
+#[test]
+#[should_panic(expected = "Error(Contract, #32)")]
+fn test_batch_individual_sig_rejects_opted_out_user() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[50u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[1u8; 32]);
+    let period_a = 202601u64;
+    let period_b = 202602u64;
+
+    // user_a opts out
+    client.opt_out(&user_a);
+
+    let item_a = make_batch_item(&env, &signing_key, &contract_id, user_a.clone(), period_a, &archetype, &hash);
+    let item_b = make_batch_item(&env, &signing_key, &contract_id, user_b.clone(), period_b, &archetype, &hash);
+
+    let mut items = soroban_sdk::vec![&env];
+    items.push_back(item_a);
+    items.push_back(item_b);
+
+    // Must panic with UserOptedOut (#32) — whole batch reverts.
+    client.mint_wrap_batch(&items, &None);
+}
+
+/// After a reverted batch (A opted-out, B innocent), B must have no wrap.
+#[test]
+fn test_batch_individual_sig_opted_out_leaves_no_partial_state() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[51u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[2u8; 32]);
+    let period_a = 202601u64;
+    let period_b = 202602u64;
+
+    client.opt_out(&user_a);
+
+    let item_a = make_batch_item(&env, &signing_key, &contract_id, user_a.clone(), period_a, &archetype, &hash);
+    let item_b = make_batch_item(&env, &signing_key, &contract_id, user_b.clone(), period_b, &archetype, &hash);
+
+    let mut items = soroban_sdk::vec![&env];
+    items.push_back(item_a);
+    items.push_back(item_b);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap_batch(&items, &None);
+    }));
+    assert!(result.is_err(), "batch with opted-out user must revert");
+
+    // No partial state: B must not have received a wrap.
+    assert!(client.get_wrap(&user_b, &period_b).is_none());
+    assert_eq!(client.balance_of(&user_b), 0);
+}
+
+/// Opt out user A, submit a batch [A, B] with an aggregated signature.
+/// The whole call must revert with UserOptedOut (#32).
+#[test]
+#[should_panic(expected = "Error(Contract, #32)")]
+fn test_batch_aggregated_sig_rejects_opted_out_user() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[52u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[3u8; 32]);
+    let period_a = 202601u64;
+    let period_b = 202602u64;
+
+    client.opt_out(&user_a);
+
+    // Items carry placeholder per-item sigs (ignored in aggregated path).
+    let dummy_sig = BytesN::from_array(&env, &[0u8; 64]);
+    let item_a = crate::storage_types::BatchWrapItem {
+        user: user_a.clone(),
+        period: period_a,
+        archetype: archetype.clone(),
+        data_hash: hash.clone(),
+        payload_version: 1,
+        signature: dummy_sig.clone(),
+    };
+    let item_b = crate::storage_types::BatchWrapItem {
+        user: user_b.clone(),
+        period: period_b,
+        archetype: archetype.clone(),
+        data_hash: hash.clone(),
+        payload_version: 1,
+        signature: dummy_sig,
+    };
+
+    let mut items = soroban_sdk::vec![&env];
+    items.push_back(item_a);
+    items.push_back(item_b);
+
+    let agg_sig = crate::test_utils::sign_batch_payload(&env, &signing_key, &contract_id, &items, 1);
+
+    // Must panic with UserOptedOut (#32).
+    client.mint_wrap_batch(&items, &Some(agg_sig));
+}
+
+/// After a reverted aggregated-sig batch (A opted-out), B must have no wrap.
+#[test]
+fn test_batch_aggregated_sig_opted_out_leaves_no_partial_state() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[53u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[4u8; 32]);
+    let period_a = 202601u64;
+    let period_b = 202602u64;
+
+    client.opt_out(&user_a);
+
+    let dummy_sig = BytesN::from_array(&env, &[0u8; 64]);
+    let item_a = crate::storage_types::BatchWrapItem {
+        user: user_a.clone(),
+        period: period_a,
+        archetype: archetype.clone(),
+        data_hash: hash.clone(),
+        payload_version: 1,
+        signature: dummy_sig.clone(),
+    };
+    let item_b = crate::storage_types::BatchWrapItem {
+        user: user_b.clone(),
+        period: period_b,
+        archetype: archetype.clone(),
+        data_hash: hash.clone(),
+        payload_version: 1,
+        signature: dummy_sig,
+    };
+
+    let mut items = soroban_sdk::vec![&env];
+    items.push_back(item_a);
+    items.push_back(item_b);
+
+    let agg_sig = crate::test_utils::sign_batch_payload(&env, &signing_key, &contract_id, &items, 1);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.mint_wrap_batch(&items, &Some(agg_sig));
+    }));
+    assert!(result.is_err(), "aggregated batch with opted-out user must revert");
+
+    // No partial state: B must not have received a wrap.
+    assert!(client.get_wrap(&user_b, &period_b).is_none());
+    assert_eq!(client.balance_of(&user_b), 0);
+}
+
+// ── total_revoked regression tests (issue #632) ──────────────────────────────
+
+#[test]
+fn test_total_revoked_zero_on_fresh_contract() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[60u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &admin_pubkey);
+
+    assert_eq!(client.total_revoked(), 0);
+}
+
+#[test]
+fn test_total_revoked_increments_correctly() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[61u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[9u8; 32]);
+    let reason = BytesN::from_array(&env, &[0u8; 32]);
+    let periods = [202601u64, 202602u64, 202603u64];
+
+    // Mint three wraps then revoke each one, asserting the counter after each.
+    for &period in &periods {
+        let sig = crate::test_utils::sign_payload(&env, &signing_key, &contract_id, &user, period, &archetype, &hash);
+        client.mint_wrap(&user, &period, &archetype, &hash, &1u32, &sig);
+    }
+
+    assert_eq!(client.total_revoked(), 0);
+
+    client.revoke_wrap(&user, &periods[0], &reason);
+    assert_eq!(client.total_revoked(), 1);
+
+    client.revoke_wrap(&user, &periods[1], &reason);
+    assert_eq!(client.total_revoked(), 2);
+
+    client.revoke_wrap(&user, &periods[2], &reason);
+    assert_eq!(client.total_revoked(), 3);
+}
+
+// ── Index-invariant regression tests (issue #633) ────────────────────────────
+
+/// Mint two wraps, revoke one, then successfully transfer the other.
+/// Before the fix this panicked with StorageInvariantViolation because
+/// WrapPeriods.len() > WrapCount after the revocation.
+#[test]
+fn test_revoke_then_transfer_succeeds() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[70u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+    client.set_transfer_fee(&token_id, &fee_recipient, &0i128);
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[7u8; 32]);
+    let period1 = 202601u64;
+    let period2 = 202602u64;
+    let reason = BytesN::from_array(&env, &[0u8; 32]);
+
+    let sig1 = crate::test_utils::sign_payload(&env, &signing_key, &contract_id, &user, period1, &archetype, &hash);
+    let sig2 = crate::test_utils::sign_payload(&env, &signing_key, &contract_id, &user, period2, &archetype, &hash);
+
+    client.mint_wrap(&user, &period1, &archetype, &hash, &1u32, &sig1);
+    client.mint_wrap(&user, &period2, &archetype, &hash, &1u32, &sig2);
+
+    // Revoke period1 — WrapPeriods and UserPeriods must be updated.
+    client.revoke_wrap(&user, &period1, &reason);
+
+    assert!(client.get_wrap(&user, &period1).is_none());
+    assert_eq!(client.balance_of(&user), 1);
+
+    // Transfer period2 — must not panic with StorageInvariantViolation.
+    client.transfer_wrap(&user, &recipient, &period2);
+
+    assert!(client.get_wrap(&user, &period2).is_none());
+    assert!(client.get_wrap(&recipient, &period2).is_some());
+    assert_eq!(client.balance_of(&user), 0);
+    assert_eq!(client.balance_of(&recipient), 1);
+}
+
+/// After a revocation WrapCount == WrapPeriods.len() == UserPeriods.len().
+#[test]
+fn test_revoke_keeps_index_invariant() {
+    let env = Env::default();
+    let contract_id = env.register(StellarWrapContract, ());
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[71u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let archetype = symbol_short!("arch");
+    let hash = BytesN::from_array(&env, &[8u8; 32]);
+    let reason = BytesN::from_array(&env, &[0u8; 32]);
+    let periods = [202601u64, 202602u64, 202603u64];
+
+    for &p in &periods {
+        let sig = crate::test_utils::sign_payload(&env, &signing_key, &contract_id, &user, p, &archetype, &hash);
+        client.mint_wrap(&user, &p, &archetype, &hash, &1u32, &sig);
+    }
+    assert_eq!(client.balance_of(&user), 3);
+
+    // Helper closure that reads both index vectors from storage.
+    let index_lens = |env: &Env, contract_id: &Address, user: &Address| -> (u32, u32) {
+        let wp: soroban_sdk::Vec<u64> = env
+            .as_contract(contract_id, || {
+                env.storage()
+                    .persistent()
+                    .get(&DataKey::WrapPeriods(user.clone()))
+                    .unwrap_or(soroban_sdk::Vec::new(env))
+            });
+        let up: soroban_sdk::Vec<u64> = env
+            .as_contract(contract_id, || {
+                env.storage()
+                    .persistent()
+                    .get(&DataKey::UserPeriods(user.clone()))
+                    .unwrap_or(soroban_sdk::Vec::new(env))
+            });
+        (wp.len(), up.len())
+    };
+
+    client.revoke_wrap(&user, &periods[0], &reason);
+    let (wp, up) = index_lens(&env, &contract_id, &user);
+    assert_eq!(client.balance_of(&user), 2);
+    assert_eq!(wp, 2, "WrapPeriods.len() must equal WrapCount after first revoke");
+    assert_eq!(up, 2, "UserPeriods.len() must equal WrapCount after first revoke");
+
+    client.revoke_wrap(&user, &periods[1], &reason);
+    let (wp, up) = index_lens(&env, &contract_id, &user);
+    assert_eq!(client.balance_of(&user), 1);
+    assert_eq!(wp, 1);
+    assert_eq!(up, 1);
+
+    client.revoke_wrap(&user, &periods[2], &reason);
+    // All periods gone — both index keys should be removed entirely (len 0).
+    let (wp, up) = index_lens(&env, &contract_id, &user);
+    assert_eq!(client.balance_of(&user), 0);
+    assert_eq!(wp, 0, "WrapPeriods key must be removed when empty");
+    assert_eq!(up, 0, "UserPeriods key must be removed when empty");
+}

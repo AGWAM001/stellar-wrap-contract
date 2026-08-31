@@ -30,6 +30,15 @@ fn validate_payload_version(e: &Env, version: u32) {
     }
 }
 
+/// Panics with [`ContractError::UserOptedOut`] if `user` has set the opt-out
+/// flag. Must be called inside a validation pass — before any state is written
+/// — so that a single opted-out item reverts the entire batch.
+fn require_not_opted_out(e: &Env, user: &Address) {
+    if e.storage().persistent().has(&DataKey::OptOut(user.clone())) {
+        panic_with_error!(e, ContractError::UserOptedOut);
+    }
+}
+
 fn get_admin_pubkey(e: &Env) -> BytesN<32> {
     e.storage()
         .instance()
@@ -84,7 +93,6 @@ pub(crate) fn update_latest_period(e: &Env, user: &Address, period: u64) {
     }
 }
 
-
 #[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn mint_wrap(
     e: Env,
@@ -99,9 +107,7 @@ pub(crate) fn mint_wrap(
     user.require_auth();
 
     // Reject minting for users who have explicitly opted out.
-    if e.storage().persistent().has(&DataKey::OptOut(user.clone())) {
-        panic_with_error!(e, ContractError::UserOptedOut);
-    }
+    require_not_opted_out(&e, &user);
 
     validate_period(&e, period);
     validate_payload_version(&e, payload_version);
@@ -247,6 +253,7 @@ pub(crate) fn mint_wrap_batch(
         for item in items.iter() {
             validate_period(&e, item.period);
             validate_payload_version(&e, item.payload_version);
+            require_not_opted_out(&e, &item.user);
             item.user.require_auth();
         }
         let payload_version = items.get(0).unwrap().payload_version;
@@ -265,6 +272,7 @@ pub(crate) fn mint_wrap_batch(
         for item in items.iter() {
             validate_period(&e, item.period);
             validate_payload_version(&e, item.payload_version);
+            require_not_opted_out(&e, &item.user);
             item.user.require_auth();
 
             if let Err(err) = verify_mint_signature(

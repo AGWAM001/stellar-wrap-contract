@@ -17,11 +17,15 @@ pub(crate) fn get_last_updated(e: Env, user: Address) -> Option<u64> {
     e.storage().persistent().get(&DataKey::LastUpdated(user))
 }
 
+/// Returns the number of active wrap records for the user.
+///
+/// Under the hood, this retrieves the `u32` wrap record counter (`DataKey::WrapCount`)
+/// and casts it to `i128` to satisfy the standard token interface return signature.
+/// The return value represents a count of discrete wrap records, not a fungible token balance.
 pub(crate) fn balance_of(e: Env, user: Address) -> i128 {
-    let count_key = DataKey::WrapCount(user);
     e.storage()
         .persistent()
-        .get::<_, u32>(&count_key)
+        .get::<_, u32>(&DataKey::WrapCount(user))
         .unwrap_or(0) as i128
 }
 
@@ -170,7 +174,7 @@ pub(crate) fn has_wrap(e: Env, user: Address, period: u64) -> bool {
 
 pub(crate) fn total_revoked(e: Env) -> u64 {
     e.storage()
-        .temporary()
+        .instance()
         .get::<_, u64>(&DataKey::TotalRevoked)
         .unwrap_or(0)
 }
@@ -189,6 +193,8 @@ pub(crate) fn symbol(e: Env) -> String {
         .unwrap_or_else(|| String::from_str(&e, "WRAP"))
 }
 
+/// Returns `0` because wrap records represent discrete, indivisible registry entries with
+/// no fractional units.
 pub(crate) fn decimals(_e: Env) -> u32 {
     0
 }
