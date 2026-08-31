@@ -9,7 +9,7 @@ use soroban_sdk::{
     symbol_short,
     testutils::{
         budget::ContractCostType,
-        {Address as _, Events},
+        {Address as _, Events, Ledger},
     },
     Address, Bytes, BytesN, Env, IntoVal, String, Symbol, TryIntoVal,
 };
